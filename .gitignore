@@ -1,0 +1,10 @@
+/vendor
+/composer.lock
+/.phpunit.cache
+/.phpunit.result.cache
+/.idea
+
+# Handover und Session-Notizen: Arbeitsmaterial, nie im Repo und nie im Paket
+/CLAUDE.md
+/MUSINGS.md
+/Handover-*.md
