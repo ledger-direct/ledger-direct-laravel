@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+         cacheDirectory=".phpunit.cache"
+         failOnWarning="true"
+         failOnRisky="true"
+         defaultTestSuite="unit">
+    <!--
+        Plain `phpunit` runs the "unit" suite: no network. The MySQL tests in it
+        skip themselves unless LEDGER_DIRECT_TEST_MYSQL_HOST is set (see README).
+        The "integration" suite talks to the real XRPL testnet and price oracles
+        and only runs when asked for with `testsuite integration`.
+    -->
+    <testsuites>
+        <testsuite name="unit">
+            <directory>tests</directory>
+            <exclude>tests/Integration</exclude>
+        </testsuite>
+        <testsuite name="integration">
+            <directory>tests/Integration</directory>
+        </testsuite>
+    </testsuites>
+
+    <source>
+        <include>
+            <directory>src</directory>
+        </include>
+        <exclude>
+            <directory>src/Testing</directory>
+        </exclude>
+    </source>
+</phpunit>

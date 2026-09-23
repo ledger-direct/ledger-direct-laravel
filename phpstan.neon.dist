@@ -1,0 +1,12 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 6
+    paths:
+        - src
+        - database
+
+    # config/ledger-direct.php is left out on purpose: Larastan's env() rule
+    # assumes an application's config directory, and a package's config file
+    # is exactly where env() belongs.
