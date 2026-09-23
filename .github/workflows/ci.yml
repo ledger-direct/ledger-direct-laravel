@@ -46,7 +46,7 @@ jobs:
         run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction --no-progress
 
       - name: Installed versions
-        run: composer show laravel/framework phpunit/phpunit hardcastle/ledger-direct-core brick/math guzzlehttp/guzzle | grep -E '^(name|versions)'
+        run: composer show | grep -E '^(laravel/framework|phpunit/phpunit|hardcastle/ledger-direct-core|brick/math|guzzlehttp/guzzle) '
 
       - name: Run tests
         run: vendor/bin/phpunit
