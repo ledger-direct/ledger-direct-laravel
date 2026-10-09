@@ -22,8 +22,8 @@ use UnexpectedValueException;
  * prefix itself. The core never learns a physical name.
  *
  * The rules this class keeps are the port's docblock, and the core's
- * XrplTransactionRepositoryContractTestCase checks them against SQLite and
- * MySQL.
+ * XrplTransactionRepositoryContractTestCase checks them against SQLite,
+ * MySQL and PostgreSQL.
  */
 final class DatabaseXrplTransactionRepository implements XrplTransactionRepositoryInterface
 {
@@ -74,8 +74,13 @@ final class DatabaseXrplTransactionRepository implements XrplTransactionReposito
     }
 
     /**
-     * Duplicates by hash are skipped by the unique index, so a sync that
-     * overlaps a previous one, or runs twice at once, stores nothing twice.
+     * Duplicates by hash are skipped, so a sync that overlaps a previous
+     * one, or runs twice at once, stores nothing twice — and *only*
+     * duplicates are skipped. This used to be INSERT IGNORE, which on MySQL
+     * also downgrades every other data error to a warning: a CTID too long
+     * for its column was stored truncated, silently, for weeks. An upsert
+     * on the hash that "updates" the hash to itself is a no-op on a
+     * duplicate and a hard error on anything else, on every driver.
      *
      * @param XrplTransaction[] $transactions
      */
@@ -85,24 +90,29 @@ final class DatabaseXrplTransactionRepository implements XrplTransactionReposito
             return;
         }
 
+        $byHash = [];
+        foreach ($transactions as $transaction) {
+            $byHash[$transaction->hash] ??= $transaction;   // one row per hash within a batch, too
+        }
+
         $rows = array_map(static fn (XrplTransaction $transaction): array => [
             'network' => $transaction->network,
             'ledger_index' => (int) $transaction->ledgerIndex,
             'hash' => $transaction->hash,
-            'ctid' => $transaction->ctid,
+            'tx_ctid' => $transaction->ctid,
             'account' => $transaction->account,
             'destination' => $transaction->destination,
             'destination_tag' => $transaction->destinationTag,
             'date' => $transaction->date,
             'meta' => self::encode($transaction->meta),
             'tx' => self::encode($transaction->tx),
-        ], array_values($transactions));
+        ], array_values($byHash));
 
         // A multi-row INSERT assigns the auto-increment keys in row order, so
         // the primary key follows the order the core handed the transactions
         // over — the tie-break findTransactions() relies on.
         foreach (array_chunk($rows, 100) as $chunk) {
-            $this->transactions()->insertOrIgnore($chunk);
+            $this->transactions()->upsert($chunk, ['hash'], ['hash']);
         }
     }
 
@@ -211,7 +221,7 @@ final class DatabaseXrplTransactionRepository implements XrplTransactionReposito
             network: (string) $row->network,
             ledgerIndex: (string) $row->ledger_index,
             hash: (string) $row->hash,
-            ctid: (string) $row->ctid,
+            ctid: (string) $row->tx_ctid,
             account: (string) $row->account,
             destination: (string) $row->destination,
             destinationTag: $row->destination_tag === null ? null : (int) $row->destination_tag,

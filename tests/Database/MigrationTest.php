@@ -12,8 +12,8 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * The migration against what the core says the tables are. Runs on SQLite,
- * and on MySQL when the suite is pointed at one — only there are the
- * unsigned flags visible.
+ * and on MySQL or PostgreSQL when the suite is pointed at one — only on
+ * MySQL are the unsigned flags visible.
  */
 final class MigrationTest extends TestCase
 {
@@ -105,7 +105,7 @@ final class MigrationTest extends TestCase
             'network' => 'mainnet',
             'ledger_index' => 99_000_000_000,
             'hash' => str_repeat('A', 64),
-            'ctid' => 'C000000000000000',
+            'tx_ctid' => 'C000000000000000',
             'account' => 'rSender',
             'destination' => 'rDest',
             'destination_tag' => 4_294_967_295,

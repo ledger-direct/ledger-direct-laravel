@@ -7,7 +7,6 @@ namespace Hardcastle\LedgerDirect\Laravel\Database;
 use Hardcastle\LedgerDirect\Core\Xrpl\Schema;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\Builder;
-use RuntimeException;
 
 /**
  * Builds the core's tables from Xrpl\Schema::tables() — read, not copied, so
@@ -23,8 +22,10 @@ use RuntimeException;
  * 32-bit `int` would reject everything above 2147483647 — including the tag
  * counter one step after a random start near its ceiling.
  *
- * PostgreSQL is refused outright: every table there has a system column
- * called `ctid`, and the core's transaction table has a column of that name.
+ * PostgreSQL works since core 0.9: the CTID column is `tx_ctid`, because
+ * every PostgreSQL table has a system column called `ctid` that no user
+ * column may be named after. The core's schema test keeps every column
+ * name clear of those.
  */
 final class LedgerDirectTables
 {
@@ -37,17 +38,7 @@ final class LedgerDirectTables
      */
     public static function create(Builder $schema): void
     {
-        $driver = $schema->getConnection()->getDriverName();
-
-        if ($driver === 'pgsql') {
-            throw new RuntimeException(
-                'LedgerDirect: PostgreSQL is not supported yet. The core\'s table ' . Schema::TABLE_TX
-                    . ' has a column named "ctid", which PostgreSQL reserves as a system column.'
-                    . ' Point ledger-direct.connection at a MySQL, MariaDB or SQLite connection.',
-            );
-        }
-
-        $unsigned = in_array($driver, self::UNSIGNED_DRIVERS, true);
+        $unsigned = in_array($schema->getConnection()->getDriverName(), self::UNSIGNED_DRIVERS, true);
 
         foreach (Schema::tables() as $table => $definition) {
             if ($schema->hasTable($table)) {

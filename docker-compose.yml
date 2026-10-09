@@ -29,3 +29,20 @@ services:
       interval: 2s
       timeout: 5s
       retries: 30
+
+  # For the PostgreSQL repository tests. 35432 on the host, 5432 is often taken.
+  # Run them on their own: with MySQL configured as well the Testbench suite
+  # takes MySQL, so `LEDGER_DIRECT_TEST_PGSQL_HOST=127.0.0.1 … vendor/bin/phpunit`
+  # from the host, without the MySQL variables.
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: ledger_direct
+    ports:
+      - "35432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

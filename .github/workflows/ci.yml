@@ -87,8 +87,49 @@ jobs:
         run: composer update --prefer-dist --no-interaction --no-progress
 
       # Nothing may skip here: a skipped contract test would pass silently.
+      # The PostgreSQL-only tests skip by design on this job.
       - name: Run tests
-        run: vendor/bin/phpunit --fail-on-skipped
+        run: vendor/bin/phpunit --fail-on-skipped --exclude-filter PgsqlDatabaseXrplTransactionRepositoryTest
+
+  pgsql:
+    name: PostgreSQL · repository contract and full suite
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: root
+          POSTGRES_DB: ledger_direct
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    env:
+      LEDGER_DIRECT_TEST_PGSQL_HOST: 127.0.0.1
+      LEDGER_DIRECT_TEST_PGSQL_PORT: 5432
+      LEDGER_DIRECT_TEST_PGSQL_DATABASE: ledger_direct
+      LEDGER_DIRECT_TEST_PGSQL_USERNAME: postgres
+      LEDGER_DIRECT_TEST_PGSQL_PASSWORD: root
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_pgsql
+          coverage: none
+
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-interaction --no-progress
+
+      # The whole suite runs on PostgreSQL here; the MySQL-only tests skip by
+      # design, everything else must run.
+      - name: Run tests
+        run: vendor/bin/phpunit --fail-on-skipped --exclude-filter MysqlDatabaseXrplTransactionRepositoryTest
 
   static:
     name: composer validate · PHPStan

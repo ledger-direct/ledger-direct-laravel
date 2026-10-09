@@ -6,7 +6,7 @@ All notable changes to this package are documented here. The format follows
 
 ## [Unreleased]
 
-First release: the Laravel bridge over `hardcastle/ledger-direct-core` 0.7.
+First release: the Laravel bridge over `hardcastle/ledger-direct-core` 0.9.
 
 ### Added
 
@@ -29,3 +29,12 @@ First release: the Laravel bridge over `hardcastle/ledger-direct-core` 0.7.
   request), `Contracts\PaymentIntentStore`, and the events `PaymentSettled`,
   `PaymentPartiallyReceived` and `PaymentReceivedInWrongAsset`, dispatched on state changes only.
 - `Testing\InMemoryPaymentIntentStore` for shop packages' tests.
+- PostgreSQL support: the migration and the repository run on PostgreSQL 17, covered by the
+  core's repository contract test and a multi-process counter test in CI.
+
+### Changed
+
+- The CTID column is `tx_ctid`, following core 0.9 — PostgreSQL reserves `ctid` as a system
+  column name. No released installation carries the old name.
+- Synced transactions are stored with an upsert on the hash instead of `INSERT IGNORE`, so only
+  duplicates are ignored; a value that does not fit its column fails instead of being truncated.

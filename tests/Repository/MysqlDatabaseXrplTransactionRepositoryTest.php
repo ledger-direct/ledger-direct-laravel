@@ -7,6 +7,7 @@ namespace Hardcastle\LedgerDirect\Laravel\Tests\Repository;
 use Hardcastle\LedgerDirect\Core\Port\XrplTransactionRepositoryInterface;
 use Hardcastle\LedgerDirect\Core\Testing\XrplTransactionRepositoryContractTestCase;
 use Hardcastle\LedgerDirect\Core\Xrpl\Schema;
+use Hardcastle\LedgerDirect\Core\Xrpl\XrplTransaction;
 use Hardcastle\LedgerDirect\Laravel\Database\LedgerDirectTables;
 use Hardcastle\LedgerDirect\Laravel\Repository\DatabaseXrplTransactionRepository;
 use Hardcastle\LedgerDirect\Laravel\Tests\Support\Databases;
@@ -91,6 +92,19 @@ final class MysqlDatabaseXrplTransactionRepositoryTest extends XrplTransactionRe
         self::assertSame(range($sequences[0], $sequences[0] + count($sequences) - 1), $sequences, 'and none is skipped');
     }
 
+    /**
+     * saveTransactions() used to be INSERT IGNORE, under which MySQL stores
+     * a 23-character CTID truncated to 16 and says nothing. Only duplicates
+     * may be ignored; a value that does not fit must fail.
+     */
+    public function testAValueThatDoesNotFitItsColumnFailsInsteadOfBeingTruncated(): void
+    {
+        $repository = $this->repository();
+
+        $this->expectException(\Illuminate\Database\QueryException::class);
+        $repository->saveTransactions([self::overlongCtidTransaction()]);
+    }
+
     public function testTheCounterIsReadFromTheWritePdoOfASplitConnection(): void
     {
         $config = Databases::mysqlConfig();
@@ -105,5 +119,21 @@ final class MysqlDatabaseXrplTransactionRepositoryTest extends XrplTransactionRe
         $first = $repository->nextDestinationTagSequence('rSplit');
         self::assertSame($first + 1, $repository->nextDestinationTagSequence('rSplit'));
         self::assertNotSame(0, $first);
+    }
+
+    private static function overlongCtidTransaction(): XrplTransaction
+    {
+        return new XrplTransaction(
+            network: 'testnet',
+            ledgerIndex: '1',
+            hash: 'HASH_LONG',
+            ctid: 'C0000000000000000000000',   // 23 characters, the column holds 16
+            account: 'rSender',
+            destination: 'rDest',
+            destinationTag: 1,
+            date: 800000000,
+            meta: [],
+            tx: [],
+        );
     }
 }

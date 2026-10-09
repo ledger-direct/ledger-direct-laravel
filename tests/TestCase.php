@@ -30,15 +30,16 @@ abstract class TestCase extends Orchestra
     }
 
     /**
-     * SQLite in memory, or the MySQL test server when one is configured —
-     * the whole suite then runs against it, migration comparison included.
+     * SQLite in memory, or the MySQL or PostgreSQL test server when one is
+     * configured — the whole suite then runs against it, migration
+     * comparison included.
      */
     protected function defineEnvironment($app): void
     {
-        $mysql = Databases::mysqlConfig();
+        $server = Databases::serverConfig();
 
-        if ($mysql !== null) {
-            $app['config']->set('database.connections.testing', $mysql + ['prefix' => 'app_']);
+        if ($server !== null) {
+            $app['config']->set('database.connections.testing', $server + ['prefix' => 'app_']);
         } else {
             $app['config']->set('database.connections.testing', [
                 'driver' => 'sqlite',

@@ -176,12 +176,14 @@ waiting on, so one customer's payment settles another customer's order.
 > **`php artisan migrate:fresh` and `db:wipe` drop every table, the counter included.** Never run
 > them against a database with orders that may still receive a payment.
 
-Supported databases: MySQL, MariaDB and SQLite. On MySQL and MariaDB the integer columns are
-unsigned, as in the core's DDL; elsewhere the unsigned columns become `bigint`, so destination tags
-up to 4294967295 fit. **PostgreSQL is not supported yet:** it reserves `ctid` as a system column
-name, and the core's transaction table has a column of that name. The migration stops with an
-explanation; `ledger-direct.connection` can point the tables at a MySQL or SQLite connection
-while the rest of the application stays on PostgreSQL.
+Supported databases: MySQL, MariaDB, PostgreSQL and SQLite. On MySQL and MariaDB the integer
+columns are unsigned, as in the core's DDL; elsewhere the unsigned columns become `bigint`, so
+destination tags up to 4294967295 fit. The CTID is stored in a column named `tx_ctid` (core 0.9):
+PostgreSQL gives every table a system column called `ctid`, which no user column may be named
+after.
+
+Inserting synced transactions ignores duplicates by hash and nothing else: a value that does not
+fit its column is an error, never a silent truncation.
 
 ## Swapping infrastructure
 
@@ -219,15 +221,19 @@ docker compose up -d mysql                  # MySQL 8.4 on localhost:33306
 LEDGER_DIRECT_TEST_MYSQL_HOST=127.0.0.1 LEDGER_DIRECT_TEST_MYSQL_PORT=33306 \
 LEDGER_DIRECT_TEST_MYSQL_PASSWORD=root vendor/bin/phpunit    # everything against MySQL
 
+docker compose up -d postgres               # PostgreSQL 17 on localhost:35432
+LEDGER_DIRECT_TEST_PGSQL_HOST=127.0.0.1 LEDGER_DIRECT_TEST_PGSQL_PORT=35432 \
+LEDGER_DIRECT_TEST_PGSQL_PASSWORD=root vendor/bin/phpunit    # everything against PostgreSQL
+
 docker compose run --rm php vendor/bin/phpunit                # the same inside the PHP 8.4 container
 
 vendor/bin/phpunit --testsuite integration  # live oracles; set LEDGER_DIRECT_TEST_XRPL_ACCOUNT
                                             # to a funded testnet account for the sync test
 ```
 
-The repository runs the core's `XrplTransactionRepositoryContractTestCase` against SQLite and
-MySQL, plus a multi-process test that the destination-tag counter is atomic on MySQL (SQLite takes
-no row locks, so atomicity is only provable there). CI covers Laravel 12 × PHP 8.2–8.4 and
+The repository runs the core's `XrplTransactionRepositoryContractTestCase` against SQLite, MySQL
+and PostgreSQL, plus a multi-process test that the destination-tag counter is atomic on MySQL and
+on PostgreSQL (SQLite takes no row locks, so atomicity is not provable there). CI covers Laravel 12 × PHP 8.2–8.4 and
 Laravel 13 × PHP 8.3–8.4, each with lowest and newest dependencies.
 
 To test against an unreleased core, point Composer at a local checkout — and don't commit it:
