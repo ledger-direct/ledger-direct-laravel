@@ -20,7 +20,7 @@
     ],
     "require": {
         "php": "^8.2",
-        "hardcastle/ledger-direct-core": "dev-fix/schema-ctid-column as 0.9.0",
+        "hardcastle/ledger-direct-core": "^0.9",
         "illuminate/cache": "^12.0 || ^13.0",
         "illuminate/console": "^12.0 || ^13.0",
         "illuminate/contracts": "^12.0 || ^13.0",
@@ -37,12 +37,6 @@
         "orchestra/testbench": "^10.0 || ^11.0",
         "phpunit/phpunit": "^11.5.3 || ^12.0 || ^13.0"
     },
-    "repositories": [
-        {
-            "type": "vcs",
-            "url": "https://github.com/ledger-direct/ledger-direct-core-php"
-        }
-    ],
     "autoload": {
         "psr-4": {
             "Hardcastle\\LedgerDirect\\Laravel\\": "src/"
