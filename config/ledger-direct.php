@@ -9,17 +9,20 @@ return [
     | Chains
     |--------------------------------------------------------------------------
     |
-    | One block per chain. Today that is the XRP Ledger; further chains are
-    | added as further blocks next to it, without touching this one.
+    | One block per chain the core knows (Core\ChainCatalog). A chain takes
+    | payments only while it is enabled; the XRP Ledger is enabled by default,
+    | so an installation from 0.1 keeps working, Stellar is opt-in.
     |
-    | There are no issuer addresses here, on purpose: which issuer an RLUSD or
-    | USDC payment has to come from is fixed in the core's StablecoinRegistry
+    | There are no issuer addresses here, on purpose: which issuer a USDC,
+    | RLUSD or EURC payment has to come from is fixed in the core's registries
     | and never configurable. A wrong issuer means lost funds.
     |
     */
 
     'chains' => [
         'xrpl' => [
+            'enabled' => (bool) env('LEDGER_DIRECT_XRPL_ENABLED', true),
+
             // mainnet | testnet
             'network' => env('LEDGER_DIRECT_XRPL_NETWORK', 'testnet'),
 
@@ -31,6 +34,24 @@ return [
                 'XRP' => true,
                 'RLUSD' => false,
                 'USDC' => false,
+            ],
+        ],
+
+        'stellar' => [
+            'enabled' => (bool) env('LEDGER_DIRECT_STELLAR_ENABLED', false),
+
+            // mainnet | testnet
+            'network' => env('LEDGER_DIRECT_STELLAR_NETWORK', 'testnet'),
+
+            // Your receiving account, a public key starting with "G".
+            'destination_account' => env('LEDGER_DIRECT_STELLAR_ACCOUNT'),
+
+            // Which assets you accept. Stablecoins are opt-in, and only offered
+            // while the account has a trust line for them (Checkout\PaymentOptions).
+            'assets' => [
+                'XLM' => true,
+                'USDC' => false,
+                'EURC' => false,
             ],
         ],
     ],

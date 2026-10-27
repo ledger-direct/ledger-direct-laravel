@@ -6,6 +6,8 @@ namespace Hardcastle\LedgerDirect\Laravel\Status;
 
 use Hardcastle\LedgerDirect\Core\LedgerDirect;
 use Hardcastle\LedgerDirect\Core\LedgerDirectException;
+use Hardcastle\LedgerDirect\Core\Stellar\LedgerDirectStellar;
+use Hardcastle\LedgerDirect\Laravel\Chains\LedgerDirectChains;
 use Hardcastle\LedgerDirect\Core\Payment\PaymentIntent;
 use Hardcastle\LedgerDirect\Core\Payment\PaymentStatus;
 use Hardcastle\LedgerDirect\Laravel\Contracts\PaymentIntentStore;
@@ -16,7 +18,9 @@ use Illuminate\Contracts\Events\Dispatcher;
 
 /**
  * The work behind a payment-status endpoint, without the route: sync the
- * receiving account (throttled), match the intent, derive the status.
+ * receiving account (throttled), match the intent, derive the status — on
+ * the chain the intent names, through that chain's composition root
+ * (LedgerDirectChains). XRPL and Stellar intents go through the same steps.
  *
  * The route, its secret and the `redirect` URL belong to the shop — see the
  * README for a signed-URL example. INVARIANTS.md ("Payment status") is the
@@ -33,7 +37,7 @@ use Illuminate\Contracts\Events\Dispatcher;
 final class StatusResponder
 {
     public function __construct(
-        private readonly LedgerDirect $ledgerDirect,
+        private readonly LedgerDirectChains $chains,
         private readonly Dispatcher $events,
     ) {
     }
@@ -79,7 +83,7 @@ final class StatusResponder
         if ($result->changed() && !$store->replace($orderRef, $intent, $result->intent)) {
             $current = $store->find($orderRef) ?? $result->intent;
 
-            return new StatusResult($current, $current, $this->ledgerDirect->paymentStatus($current), $result->synced);
+            return new StatusResult($current, $current, $this->chains->forIntent($current)->paymentStatus($current), $result->synced);
         }
 
         $this->dispatchOnStateChange($result, $orderRef);
@@ -89,17 +93,19 @@ final class StatusResponder
 
     private function resolve(PaymentIntent $intent): StatusResult
     {
+        $root = $this->chains->forIntent($intent);
+
         // Settled is terminal: nothing on the ledger can change the answer.
-        if ($this->ledgerDirect->settlementPolicy()->isSettled($intent)) {
-            return new StatusResult($intent, $intent, $this->ledgerDirect->paymentStatus($intent), false);
+        if ($root->settlementPolicy()->isSettled($intent)) {
+            return new StatusResult($intent, $intent, $root->paymentStatus($intent), false);
         }
 
-        $synced = $this->syncThrottled($intent->destinationAccount, $intent->network);
+        $synced = $this->syncThrottled($root, $intent->destinationAccount, $intent->network);
 
-        $fulfillment = $this->ledgerDirect->syncService()->findFulfillmentFor($intent);
+        $fulfillment = $root->syncService()->findFulfillmentFor($intent);
         $matched = $fulfillment?->applyTo($intent) ?? $intent;
 
-        return new StatusResult($matched, $intent, $this->ledgerDirect->paymentStatus($matched), $synced);
+        return new StatusResult($matched, $intent, $root->paymentStatus($matched), $synced);
     }
 
     /**
@@ -111,9 +117,9 @@ final class StatusResponder
      * what is already stored, in the same shape — a customer's payment page
      * must not break because the node had a bad second.
      */
-    private function syncThrottled(string $account, string $network): bool
+    private function syncThrottled(LedgerDirect|LedgerDirectStellar $root, string $account, string $network): bool
     {
-        $throttle = $this->ledgerDirect->syncThrottle();
+        $throttle = $root->syncThrottle();
 
         if ($throttle !== null) {
             if (!$throttle->shouldSync($network, $account)) {
@@ -124,9 +130,9 @@ final class StatusResponder
         }
 
         try {
-            $this->ledgerDirect->syncService()->syncTransactions($account, $network);
+            $root->syncService()->sync($account, $network);
         } catch (LedgerDirectException $exception) {
-            $this->ledgerDirect->logger()->warning('LedgerDirect: status sync failed, answering from stored transactions', [
+            $root->logger()->warning('LedgerDirect: status sync failed, answering from stored transactions', [
                 'account' => $account,
                 'network' => $network,
                 'exception' => $exception->getMessage(),
@@ -142,7 +148,7 @@ final class StatusResponder
      */
     private function dispatchOnStateChange(StatusResult $result, ?string $orderRef): void
     {
-        $previousState = $this->ledgerDirect->paymentStatus($result->previousIntent)->state();
+        $previousState = $this->chains->forIntent($result->previousIntent)->paymentStatus($result->previousIntent)->state();
         $state = $result->status->state();
 
         if ($state === $previousState) {

@@ -11,6 +11,8 @@ use Hardcastle\LedgerDirect\Core\Testing\RecordingLogger;
 use Hardcastle\LedgerDirect\Laravel\Database\LedgerDirectTables;
 use Hardcastle\LedgerDirect\Laravel\LedgerDirectServiceProvider;
 use Hardcastle\LedgerDirect\Laravel\Tests\Support\Databases;
+use Hardcastle\LedgerDirect\Core\Stellar\Schema as StellarSchema;
+use Hardcastle\LedgerDirect\Core\Xrpl\Schema as XrplSchema;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as Orchestra;
 
@@ -18,6 +20,12 @@ abstract class TestCase extends Orchestra
 {
     /** A well-formed classic address; nothing is ever sent to it. */
     public const ACCOUNT = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh';
+
+    /** A well-formed Stellar public key; nothing is ever sent to it. */
+    public const STELLAR_ACCOUNT = 'GAHK7EEG2WWHVKDNT4CEQFZGKF2LGDSW2IVM4S5DP42RBW3K6BTODB4A';
+
+    /** Horizon testnet, as the core's HorizonClient addresses it. */
+    public const HORIZON = 'horizon-testnet.stellar.org';
 
     protected function getPackageProviders($app): array
     {
@@ -54,14 +62,26 @@ abstract class TestCase extends Orchestra
         $app['config']->set('ledger-direct.chains.xrpl.destination_account', self::ACCOUNT);
     }
 
-    /** Fresh tables for tests that touch the database; the counter table included. */
+    /** Fresh tables of both chains for tests that touch the database; the counter tables included. */
     protected function createTables(): void
     {
-        foreach (['ledger_direct_xrpl_tx', 'ledger_direct_xrpl_destination_tag'] as $table) {
+        $tables = array_merge(array_keys(XrplSchema::tables()), array_keys(StellarSchema::tables()));
+
+        foreach ($tables as $table) {
             Schema::dropIfExists($table);
         }
 
         LedgerDirectTables::create(Schema::connection(null));
+        LedgerDirectTables::createStellar(Schema::connection(null));
+    }
+
+    /** Turns Stellar on with a valid receiving account; $assets on top of XLM. */
+    protected function enableStellar(array $assets = []): void
+    {
+        $this->app['config']->set('ledger-direct.chains.stellar.enabled', true);
+        $this->app['config']->set('ledger-direct.chains.stellar.network', 'testnet');
+        $this->app['config']->set('ledger-direct.chains.stellar.destination_account', self::STELLAR_ACCOUNT);
+        $this->app['config']->set('ledger-direct.chains.stellar.assets', ['XLM' => true] + $assets);
     }
 
     protected function fakeHttp(): FakeHttpClient
@@ -126,6 +146,60 @@ abstract class TestCase extends Orchestra
             amountRequested: $requested,
             destinationAccount: self::ACCOUNT,
             destinationTag: $tag,
+            expiry: $expiry,
+        );
+    }
+
+    /**
+     * A page of Horizon's /accounts/{id}/payments, as the core reads it.
+     *
+     * @param list<array<string, mixed>> $records
+     */
+    protected static function horizonPayments(array $records = []): Response
+    {
+        return new Response(200, [], json_encode(['_embedded' => ['records' => $records]], JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * One incoming payment operation as Horizon lists it. The operation id
+     * is a TOID: ledger << 32 | transaction order << 12 | operation index.
+     *
+     * @return array<string, mixed>
+     */
+    protected static function stellarPayment(string $hash, int $memoId, string $amount, int $ledger = 1000, ?string $assetCode = null, ?string $issuer = null): array
+    {
+        $id = (string) (($ledger << 32) | (1 << 12) | 1);
+
+        return [
+            'id' => $id,
+            'paging_token' => $id,
+            'type' => 'payment',
+            'transaction_successful' => true,
+            'transaction_hash' => $hash,
+            'from' => 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H',
+            'to' => self::STELLAR_ACCOUNT,
+            'asset_type' => $assetCode === null ? 'native' : 'credit_alphanum4',
+            'asset_code' => $assetCode,
+            'asset_issuer' => $issuer,
+            'amount' => $amount,
+            'created_at' => '2026-10-27T12:00:00Z',
+            'transaction' => ['memo_type' => 'id', 'memo' => (string) $memoId],
+        ];
+    }
+
+    protected static function xlmIntent(float $requested, ?int $expiry = null, int $memoId = 4242): PaymentIntent
+    {
+        return PaymentIntent::quote(
+            type: 'stellar-xlm-payment',
+            chain: 'STELLAR',
+            network: 'testnet',
+            baseAsset: 'XLM',
+            quoteCurrency: 'EUR',
+            pairing: 'XLM/EUR',
+            exchangeRate: 0.25,
+            amountRequested: $requested,
+            destinationAccount: self::STELLAR_ACCOUNT,
+            destinationTag: $memoId,
             expiry: $expiry,
         );
     }
