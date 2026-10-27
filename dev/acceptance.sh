@@ -5,10 +5,12 @@
 #
 # Creates a new app with `composer create-project laravel/laravel`, installs
 # this package the way Packagist will ship it (a `git archive` of
-# LEDGER_DIRECT_ACCEPTANCE_REF, default HEAD, as version 0.1.0), then walks
+# LEDGER_DIRECT_ACCEPTANCE_REF, default HEAD, as version
+# LEDGER_DIRECT_ACCEPTANCE_VERSION, default 0.2.0), then walks
 # the README: vendor:publish, migrate, a funded testnet account in .env,
 # `about`, `ledger-direct:price`, `ledger-direct:sync`, two quotes, a status
-# answer, and migrate:rollback keeping the destination-tag counter.
+# answer — first on the XRP Ledger, then with Stellar enabled on a
+# Friendbot-funded account — and migrate:rollback keeping both counters.
 #
 # Needs network (Packagist, the XRPL testnet faucet and node, the price
 # oracles), PHP with pdo_sqlite/pdo_mysql/pdo_pgsql, Composer, curl and jq.
@@ -27,6 +29,7 @@ case "$database" in sqlite|mysql|pgsql) ;; *) echo "sqlite, mysql or pgsql, not 
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 ref=${LEDGER_DIRECT_ACCEPTANCE_REF:-HEAD}
+version=${LEDGER_DIRECT_ACCEPTANCE_VERSION:-0.2.0}
 work=${LEDGER_DIRECT_ACCEPTANCE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/ledger-direct-acceptance.XXXXXX")}
 app="$work/laravel-$laravel-$database"
 package="$work/package"
@@ -85,10 +88,10 @@ case "$database" in
 esac
 php "$app/artisan" migrate --force --no-interaction
 
-step "composer require hardcastle/ledger-direct-laravel:0.1.0 (from the archive)"
+step "composer require hardcastle/ledger-direct-laravel:$version (from the archive)"
 composer --working-dir="$app" config repositories.ledger-direct-laravel \
-  "{\"type\":\"path\",\"url\":\"$package\",\"options\":{\"symlink\":false,\"versions\":{\"hardcastle/ledger-direct-laravel\":\"0.1.0\"}}}"
-composer --working-dir="$app" require "hardcastle/ledger-direct-laravel:0.1.0" --no-interaction --no-progress -W
+  "{\"type\":\"path\",\"url\":\"$package\",\"options\":{\"symlink\":false,\"versions\":{\"hardcastle/ledger-direct-laravel\":\"$version\"}}}"
+composer --working-dir="$app" require "hardcastle/ledger-direct-laravel:$version" --no-interaction --no-progress -W
 composer --working-dir="$app" show hardcastle/ledger-direct-core | grep -E '^versions'
 
 step "vendor:publish"
@@ -125,6 +128,25 @@ php "$app/acceptance-checks.php" synced
 
 step "Two quotes and a status answer"
 php "$app/acceptance-checks.php" quotes
+
+step "Stellar: a Friendbot-funded account in .env"
+stellar_account=$("$repo/dev/fund-stellar-testnet-account.sh")
+set_env LEDGER_DIRECT_STELLAR_ENABLED true
+set_env LEDGER_DIRECT_STELLAR_NETWORK testnet
+set_env LEDGER_DIRECT_STELLAR_ACCOUNT "$stellar_account"
+echo "$stellar_account"
+
+step "Stellar: about, price XLM EUR, sync"
+about=$(php "$app/artisan" about --only=ledgerdirect)
+echo "$about"
+grep -q "${stellar_account:0:6}" <<<"$about" || fail "about does not show the Stellar account"
+php "$app/artisan" ledger-direct:price XLM EUR | tee "$work/price-xlm.txt"
+grep -q 'XLM/EUR' "$work/price-xlm.txt" || fail "no XLM/EUR rate"
+php "$app/artisan" ledger-direct:sync --chain=stellar
+php "$app/artisan" ledger-direct:sync
+
+step "Stellar: payment options, two quotes and a status answer"
+php "$app/acceptance-checks.php" stellar
 
 step "migrate:rollback keeps the counter, migrate rebuilds the rest"
 php "$app/artisan" migrate:rollback --force --no-interaction
