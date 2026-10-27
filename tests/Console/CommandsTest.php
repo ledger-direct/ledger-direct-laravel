@@ -156,6 +156,19 @@ final class CommandsTest extends TestCase
             ->assertSuccessful();
     }
 
+    /** PHP prints a tiny float in exponent form; the rate must still show exactly, not as 0. */
+    public function testPriceShowsATinyRateExactly(): void
+    {
+        $http = $this->fakeHttp();
+        $http->queueResponse('api.binance.com', new Response(200, [], '{"price":"0.0000000000004"}'));
+        $http->queueResponse('api.coingecko.com', new Response(200, [], '{"stellar":{"eur":0.0000000000004}}'));
+        $http->queueResponse('api.kraken.com', new Response(200, [], '{"result":{"XXLMZEUR":{"c":["0.0000000000004","100"]}}}'));
+
+        $this->artisan('ledger-direct:price', ['asset' => 'XLM', 'currency' => 'EUR'])
+            ->expectsOutputToContain('1 XLM = 0.0000000000004 EUR')
+            ->assertSuccessful();
+    }
+
     /** EURC is pegged to the euro: no oracle is asked. */
     public function testPriceOfEurcInEuroTakesThePeg(): void
     {

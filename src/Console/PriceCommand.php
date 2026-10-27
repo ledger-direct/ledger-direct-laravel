@@ -95,13 +95,13 @@ final class PriceCommand extends Command
         return is_string($option) && $option !== '' ? " on the chain \"{$option}\"" : '';
     }
 
-    /** A decimal without exponent or trailing zeros: "0.84757", "2", "1.17984333". */
+    /**
+     * A decimal without exponent or trailing zeros: "0.84757", "2", "1.17984333".
+     * BigDecimal reads exponent form ("4.0E-13", how PHP prints a small float)
+     * exactly, so no fixed number of places can round a rate to zero.
+     */
     private static function plain(string $decimal): string
     {
-        $value = is_numeric($decimal) && stripos($decimal, 'e') !== false
-            ? BigDecimal::of(sprintf('%.12F', (float) $decimal))
-            : BigDecimal::of($decimal);
-
-        return PaymentIntent::plainDecimal($value);
+        return PaymentIntent::plainDecimal(BigDecimal::of($decimal));
     }
 }
