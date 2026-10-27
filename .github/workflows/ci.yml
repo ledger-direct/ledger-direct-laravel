@@ -177,10 +177,17 @@ jobs:
           address=$(dev/fund-testnet-account.sh)
           echo "address=$address" >> "$GITHUB_OUTPUT"
 
+      - name: Fund a Stellar testnet account
+        id: stellar
+        run: |
+          address=$(dev/fund-stellar-testnet-account.sh)
+          echo "address=$address" >> "$GITHUB_OUTPUT"
+
       # --fail-on-skipped: a missing account must fail the job, not skip the sync test.
       - name: Run integration suite
         env:
           LEDGER_DIRECT_TEST_XRPL_ACCOUNT: ${{ steps.account.outputs.address }}
+          LEDGER_DIRECT_TEST_STELLAR_ACCOUNT: ${{ steps.stellar.outputs.address }}
         run: vendor/bin/phpunit --testsuite integration --fail-on-skipped
 
   acceptance:
