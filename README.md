@@ -245,6 +245,14 @@ vendor/bin/phpunit --testsuite integration  # live oracles; set LEDGER_DIRECT_TE
                                             # to a funded testnet account for the sync test
 ```
 
+**Acceptance in a fresh app.** `dev/acceptance.sh <12|13> <sqlite|mysql|pgsql>` creates a new
+Laravel app with `composer create-project`, installs this package from a `git archive` of `HEAD`
+(what Packagist ships) and walks this README: publish, migrate, a faucet-funded testnet account,
+`about`, `price`, `sync`, two quotes from consecutive counter values, a status answer, and a
+rollback that keeps the counter. It needs network, and for MySQL/PostgreSQL the Docker containers
+above. CI runs all six combinations together with the integration suite when the workflow is
+started by hand with *integration* ticked.
+
 The repository runs the core's `XrplTransactionRepositoryContractTestCase` against SQLite, MySQL
 and PostgreSQL, plus a multi-process test that the destination-tag counter is atomic on MySQL and
 on PostgreSQL (SQLite takes no row locks, so atomicity is not provable there). CI covers Laravel 12 × PHP 8.2–8.4 and
