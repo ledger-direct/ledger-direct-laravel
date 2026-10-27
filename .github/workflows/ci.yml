@@ -168,24 +168,12 @@ jobs:
       - name: Install dependencies
         run: composer update --prefer-dist --no-interaction --no-progress
 
-      # A fresh account per run: the testnet is reset now and then, so a stored
-      # address would go stale. The faucet funds it with one payment, which the
-      # sync test then has to find. Wait until that payment is validated.
+      # A fresh account per run, see dev/fund-testnet-account.sh.
       - name: Fund a testnet account
         id: account
         run: |
-          address=$(curl -sf -X POST https://faucet.altnet.rippletest.net/accounts | jq -r '.account.address // .account.classicAddress')
-          test -n "$address" && test "$address" != null
+          address=$(dev/fund-testnet-account.sh)
           echo "address=$address" >> "$GITHUB_OUTPUT"
-          for attempt in $(seq 1 30); do
-            funded=$(curl -sf -H 'Content-Type: application/json' https://s.altnet.rippletest.net:51234/ \
-              -d "{\"method\":\"account_info\",\"params\":[{\"account\":\"$address\",\"ledger_index\":\"validated\"}]}" \
-              | jq -r '.result.account_data.Account // empty')
-            [ "$funded" = "$address" ] && exit 0
-            sleep 2
-          done
-          echo "Faucet account $address was not validated within 60 s" >&2
-          exit 1
 
       # --fail-on-skipped: a missing account must fail the job, not skip the sync test.
       - name: Run integration suite
