@@ -166,36 +166,39 @@ final class DatabaseXrplTransactionRepository implements XrplTransactionReposito
     }
 
     /**
-     * Every other driver: read the row under a lock, then write it back, in
-     * one transaction. Two first calls for a new account can both find no
-     * row; the loser of the insert race gets a unique violation and simply
-     * goes round again, now finding the winner's row.
+     * Every other driver: increment first, read second, in one transaction.
      *
-     * SQLite takes no row locks — lockForUpdate() is a no-op there — but it
-     * serialises every write transaction on the whole database, which gives
-     * the same guarantee for this read-modify-write.
+     * The UPDATE is the transaction's first statement, so it takes the write
+     * lock before anything is read — the row lock on PostgreSQL, the
+     * database's write lock on SQLite. A read first would make SQLite upgrade
+     * a read lock to a write lock, and that upgrade fails at once with
+     * "database is locked" when another request wrote in between, busy
+     * timeout or not: two customers checking out at the same moment, one of
+     * them without a destination tag.
+     *
+     * No row updated means a new account: insert the random start. Two first
+     * calls can both get there; the loser of the insert race gets a unique
+     * violation and goes round again, now incrementing the winner's row.
      */
     private function nextSequencePortable(string $destinationAccount): int
     {
         for ($attempt = 1; ; $attempt++) {
             try {
                 return $this->connection->transaction(function () use ($destinationAccount): int {
-                    $current = $this->counters()
+                    $updated = $this->counters()
                         ->where('destination_account', $destinationAccount)
-                        ->lockForUpdate()
-                        ->value('sequence');
+                        ->increment('sequence');
 
-                    if ($current === null) {
+                    if ($updated === 0) {
                         $start = random_int(0, self::MAX_RANDOM_START);
                         $this->counters()->insert(['destination_account' => $destinationAccount, 'sequence' => $start]);
 
                         return $start;
                     }
 
-                    $next = (int) $current + 1;
-                    $this->counters()->where('destination_account', $destinationAccount)->update(['sequence' => $next]);
-
-                    return $next;
+                    return (int) $this->counters()
+                        ->where('destination_account', $destinationAccount)
+                        ->value('sequence');
                 });
             } catch (UniqueConstraintViolationException $exception) {
                 if ($attempt >= self::COUNTER_ATTEMPTS) {

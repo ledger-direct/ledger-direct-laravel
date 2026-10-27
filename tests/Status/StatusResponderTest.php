@@ -18,10 +18,13 @@ use Hardcastle\LedgerDirect\Laravel\Events\PaymentPartiallyReceived;
 use Hardcastle\LedgerDirect\Laravel\Events\PaymentReceivedInWrongAsset;
 use Hardcastle\LedgerDirect\Laravel\Events\PaymentSettled;
 use Hardcastle\LedgerDirect\Laravel\LedgerDirectServiceProvider;
+use Hardcastle\LedgerDirect\Laravel\Contracts\PaymentIntentStore;
 use Hardcastle\LedgerDirect\Laravel\Status\StatusResponder;
 use Hardcastle\LedgerDirect\Laravel\Testing\InMemoryPaymentIntentStore;
 use Hardcastle\LedgerDirect\Laravel\Tests\TestCase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use RuntimeException;
 
 final class StatusResponderTest extends TestCase
 {
@@ -242,6 +245,88 @@ final class StatusResponderTest extends TestCase
         self::assertSame(2, $store->saveCount());
         self::assertSame('H9', $store->find('order-9')?->hash);
         self::assertSame('H9', $seenByListener?->hash, 'the listener already reads the saved intent');
+    }
+
+    /**
+     * Two polls for the same order load the same intent before either has
+     * saved; the second does not sync (throttled) but matches the payment the
+     * first one stored. Only the compare-and-set winner may dispatch, or the
+     * shop invoices twice.
+     */
+    public function testConcurrentPollsForOneOrderDispatchOnce(): void
+    {
+        $this->fakeEvents();
+        $inner = new InMemoryPaymentIntentStore();
+        $inner->save('order-9', self::xrpIntent(10.0, tag: 999));
+        $store = new class ($inner) implements PaymentIntentStore {
+            private int $staleReads = 2;
+            private readonly ?PaymentIntent $snapshot;
+
+            public function __construct(private readonly InMemoryPaymentIntentStore $inner)
+            {
+                $this->snapshot = $inner->find('order-9');
+            }
+
+            // The first two reads happen before either poll has written.
+            public function find(string $orderRef): ?PaymentIntent
+            {
+                return $this->staleReads-- > 0 ? $this->snapshot : $this->inner->find($orderRef);
+            }
+
+            public function save(string $orderRef, PaymentIntent $intent): void
+            {
+                $this->inner->save($orderRef, $intent);
+            }
+
+            public function replace(string $orderRef, PaymentIntent $expected, PaymentIntent $intent): bool
+            {
+                return $this->inner->replace($orderRef, $expected, $intent);
+            }
+        };
+        $this->http->queueResponse(self::NODE, self::accountTx([self::xrpPayment('H9', 999, 10_000_000)]));
+
+        $first = $this->responder()->respondFor('order-9', $store);
+        $second = $this->responder()->respondFor('order-9', $store);
+
+        self::assertSame('settled', $first?->status->state());
+        self::assertSame('settled', $second?->status->state(), 'the loser answers from what the winner stored');
+        self::assertFalse($second->synced);
+        Event::assertDispatchedTimes(PaymentSettled::class, 1);
+        self::assertSame(2, $inner->saveCount(), 'the initial save and one replace');
+    }
+
+    public function testAnEventInsideARolledBackTransactionIsNeverDispatched(): void
+    {
+        $store = new InMemoryPaymentIntentStore();
+        $store->save('order-9', self::xrpIntent(10.0, tag: 999));
+        $dispatched = 0;
+        Event::listen(PaymentSettled::class, static function () use (&$dispatched): void {
+            $dispatched++;
+        });
+        $this->http->queueResponse(self::NODE, self::accountTx([self::xrpPayment('H9', 999, 10_000_000)]));
+
+        try {
+            DB::transaction(function () use ($store): void {
+                $this->responder()->respondFor('order-9', $store);
+                throw new RuntimeException('the shop rolls back');
+            });
+        } catch (RuntimeException) {
+        }
+
+        self::assertSame(0, $dispatched);
+    }
+
+    /** Listeners should be queued so the queue retries them; the events have to survive serialization. */
+    public function testTheEventsSurviveSerializationForQueuedListeners(): void
+    {
+        $intent = self::xrpIntent(10.0)->withFulfillment('H', 10.0, 'C000006400000001');
+        $event = new PaymentSettled('order-1', $intent, self::xrpIntent(10.0), $this->app->make(\Hardcastle\LedgerDirect\Core\LedgerDirect::class)->paymentStatus($intent), 'waiting');
+
+        $copy = unserialize(serialize($event));
+
+        self::assertInstanceOf(PaymentSettled::class, $copy);
+        self::assertSame($intent->toArray(), $copy->intent->toArray());
+        self::assertSame('settled', $copy->status->state());
     }
 
     public function testRespondForAnUnknownOrderIsNull(): void

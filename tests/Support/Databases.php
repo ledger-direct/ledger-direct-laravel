@@ -32,6 +32,27 @@ final class Databases
         return $capsule->getConnection();
     }
 
+    /**
+     * A file-backed SQLite database, as a Laravel app uses by default. Unlike
+     * :memory:, several processes can open it, so lock contention between
+     * concurrent requests is reproducible. The busy timeout is what an app
+     * should configure; without one SQLite fails a contended write at once.
+     */
+    public static function sqliteFile(string $path, ?string $journalMode = null, string $prefix = ''): Connection
+    {
+        $capsule = new Manager();
+        $capsule->addConnection([
+            'driver' => 'sqlite',
+            'database' => $path,
+            'prefix' => $prefix,
+            'foreign_key_constraints' => true,
+            'busy_timeout' => 5000,
+            'journal_mode' => $journalMode,
+        ]);
+
+        return $capsule->getConnection();
+    }
+
     public static function mysql(string $prefix = ''): ?Connection
     {
         $config = self::mysqlConfig();

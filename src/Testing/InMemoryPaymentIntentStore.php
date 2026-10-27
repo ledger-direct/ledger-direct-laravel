@@ -30,7 +30,21 @@ final class InMemoryPaymentIntentStore implements PaymentIntentStore
         $this->saves++;
     }
 
-    /** How often save() was called — for asserting that nothing unchanged is written. */
+    public function replace(string $orderRef, PaymentIntent $expected, PaymentIntent $intent): bool
+    {
+        $stored = $this->find($orderRef);
+
+        if ($stored === null || $stored->toArray() !== $expected->toArray()) {
+            return false;
+        }
+
+        $this->records[$orderRef] = $intent->toArray();
+        $this->saves++;
+
+        return true;
+    }
+
+    /** How often save() or a successful replace() wrote — for asserting that nothing unchanged is written. */
     public function saveCount(): int
     {
         return $this->saves;

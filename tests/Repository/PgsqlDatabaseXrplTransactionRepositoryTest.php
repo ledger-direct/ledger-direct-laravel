@@ -11,6 +11,7 @@ use Hardcastle\LedgerDirect\Core\Xrpl\XrplTransaction;
 use Hardcastle\LedgerDirect\Laravel\Database\LedgerDirectTables;
 use Hardcastle\LedgerDirect\Laravel\Repository\DatabaseXrplTransactionRepository;
 use Hardcastle\LedgerDirect\Laravel\Tests\Support\Databases;
+use Hardcastle\LedgerDirect\Laravel\Tests\Support\DrawsSequencesConcurrently;
 use Illuminate\Database\Connection;
 use Illuminate\Database\QueryException;
 
@@ -24,6 +25,8 @@ use Illuminate\Database\QueryException;
  */
 final class PgsqlDatabaseXrplTransactionRepositoryTest extends XrplTransactionRepositoryContractTestCase
 {
+    use DrawsSequencesConcurrently;
+
     private const PREFIX = 'app_';
 
     private ?Connection $connection = null;
@@ -70,34 +73,7 @@ final class PgsqlDatabaseXrplTransactionRepositoryTest extends XrplTransactionRe
     {
         $this->repository();
 
-        $workers = 4;
-        $callsPerWorker = 50;
-        $processes = [];
-
-        for ($i = 0; $i < $workers; $i++) {
-            $processes[] = proc_open(
-                [PHP_BINARY, __DIR__ . '/../Fixtures/draw-sequences.php', self::PREFIX, 'rConcurrent', (string) $callsPerWorker],
-                [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-                $pipes[$i],
-            );
-        }
-
-        $sequences = [];
-        foreach ($processes as $i => $process) {
-            $output = stream_get_contents($pipes[$i][1]);
-            $errors = stream_get_contents($pipes[$i][2]);
-            self::assertSame(0, proc_close($process), "worker {$i} failed: {$errors}");
-
-            foreach (array_filter(explode("\n", (string) $output)) as $line) {
-                $sequences[] = (int) $line;
-            }
-        }
-
-        self::assertCount($workers * $callsPerWorker, $sequences);
-        self::assertCount(count($sequences), array_unique($sequences), 'no sequence is handed out twice');
-
-        sort($sequences);
-        self::assertSame(range($sequences[0], $sequences[0] + count($sequences) - 1), $sequences, 'and none is skipped');
+        $this->assertConcurrentDrawsAreGaplessAndUnique(self::PREFIX);
     }
 
     /** PostgreSQL enforces the column width itself; the upsert must not hide that. */

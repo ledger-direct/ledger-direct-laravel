@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Hardcastle\LedgerDirect\Laravel\Config;
 
+use Hardcastle\LedgerDirect\Core\ChainCatalog;
 use Hardcastle\LedgerDirect\Core\Port\ConfigProviderInterface;
 use Illuminate\Contracts\Config\Repository;
 
@@ -30,14 +31,6 @@ final class LaravelConfigProvider implements ConfigProviderInterface
     private const CHAIN_KEYS = [
         'XRPL' => 'xrpl',
     ];
-
-    /**
-     * A classic XRPL address: "r" followed by 24 to 34 characters of the
-     * ledger's base58 alphabet, which has no 0, O, I or l. A format check,
-     * not a checksum — enough to catch a pasted X-address, a Stellar G-key
-     * or a truncated value before a customer is sent there.
-     */
-    private const XRPL_CLASSIC_ADDRESS = '/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/';
 
     public function __construct(
         private readonly Repository $config,
@@ -75,7 +68,10 @@ final class LaravelConfigProvider implements ConfigProviderInterface
             ));
         }
 
-        if (!is_string($account) || preg_match(self::XRPL_CLASSIC_ADDRESS, $account) !== 1) {
+        // The core's format check (ChainCatalog): catches a pasted X-address,
+        // a Stellar G-key, a truncated value or a trailing newline. Not a
+        // checksum — that is a core ticket, and arrives here with the core.
+        if (!is_string($account) || !ChainCatalog::chain($chain)->isValidAccount($account)) {
             throw new InvalidConfigurationException(sprintf(
                 'LedgerDirect: ledger-direct.%s is not a classic XRPL address (r…), got %s. Check %s in your .env.',
                 $key,

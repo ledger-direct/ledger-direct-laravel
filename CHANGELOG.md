@@ -28,9 +28,12 @@ bound by this release).
 - `Clock\LaravelClock`, so `Date::setTestNow()` reaches the core.
 - `ledger-direct:sync` and `ledger-direct:price` Artisan commands and a `php artisan about` section.
 - Payment-status building blocks: `Status\StatusResponder` (throttled sync, marked before the node
-  request), `Contracts\PaymentIntentStore`, and the events `PaymentSettled`,
-  `PaymentPartiallyReceived` and `PaymentReceivedInWrongAsset`, dispatched on state changes only.
-- `Testing\InMemoryPaymentIntentStore` for shop packages' tests.
+  request), `Contracts\PaymentIntentStore` with a compare-and-set `replace()`, and the events
+  `PaymentSettled`, `PaymentPartiallyReceived` and `PaymentReceivedInWrongAsset`, dispatched on
+  state changes only, by the request whose `replace()` won, after the surrounding transaction
+  commits.
+- `Testing\InMemoryPaymentIntentStore` and `Testing\PaymentIntentStoreContractTestCase` for shop
+  packages' tests.
 - PostgreSQL support: the migration and the repository run on PostgreSQL 17, covered by the
   core's repository contract test and a multi-process counter test in CI.
 
@@ -40,3 +43,8 @@ bound by this release).
   column name. No released installation carries the old name.
 - Synced transactions are stored with an upsert on the hash instead of `INSERT IGNORE`, so only
   duplicates are ignored; a value that does not fit its column fails instead of being truncated.
+- The destination-tag counter on PostgreSQL and SQLite increments before it reads. Reading first
+  made SQLite fail concurrent checkouts with "database is locked"; a file-SQLite test with six
+  processes covers it.
+- The receiving address is checked with the core's `ChainCatalog` instead of a pattern of its own,
+  which also rejects a trailing newline.

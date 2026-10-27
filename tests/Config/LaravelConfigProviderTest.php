@@ -52,6 +52,7 @@ final class LaravelConfigProviderTest extends TestCase
         yield 'truncated' => ['rHb9CJAWyB4rj91'];
         yield 'contains 0' => ['rHb9CJAWyB4rj91VRWn96DkukG4bwdty0h'];
         yield 'whitespace' => [' ' . self::ACCOUNT];
+        yield 'trailing newline' => [self::ACCOUNT . "\n"];
         yield 'not a string' => [12345];
     }
 

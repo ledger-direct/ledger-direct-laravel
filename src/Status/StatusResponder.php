@@ -42,7 +42,9 @@ final class StatusResponder
      * Brings an order's stored intent up to date and answers with its status.
      *
      * Persisting the result is the caller's job: if StatusResult::changed(),
-     * save $result->intent. Events have already been dispatched by then.
+     * save $result->intent. Events have already been dispatched by then —
+     * by every call that sees the change, so two concurrent polls for the
+     * same order dispatch twice. respondFor() does not; prefer it.
      *
      * @param string|null $orderRef passed through to the events, so a listener can find its order
      */
@@ -56,8 +58,11 @@ final class StatusResponder
 
     /**
      * respond() with the loading and saving done: finds the order's intent
-     * in $store, and saves the new one before any event is dispatched, so a
-     * listener that reads the store sees what the event says.
+     * in $store and stores the new one with a compare-and-set before any
+     * event is dispatched, so a listener that reads the store sees what the
+     * event says — and only the request that wins the compare-and-set
+     * dispatches. A concurrent poll that matched the same payment loses it
+     * and answers from what the winner stored, without an event.
      *
      * @return StatusResult|null null when the store has no intent for $orderRef
      */
@@ -71,8 +76,10 @@ final class StatusResponder
 
         $result = $this->resolve($intent);
 
-        if ($result->changed()) {
-            $store->save($orderRef, $result->intent);
+        if ($result->changed() && !$store->replace($orderRef, $intent, $result->intent)) {
+            $current = $store->find($orderRef) ?? $result->intent;
+
+            return new StatusResult($current, $current, $this->ledgerDirect->paymentStatus($current), $result->synced);
         }
 
         $this->dispatchOnStateChange($result, $orderRef);

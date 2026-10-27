@@ -117,9 +117,14 @@ customers are polling — the mark is set *before* the node request, so a hangin
 every poll that queues up behind it), matches the intent via the core and derives the status. A
 node failure is logged and the answer comes from what is already stored.
 
-**`PaymentIntentStore`** is a two-method contract (`find()`, `save()`) for wherever your orders keep
-their intent. With it, `respondFor()` loads, matches, saves only when something changed, and then
-dispatches events.
+**`PaymentIntentStore`** is a small contract for wherever your orders keep their intent: `find()`,
+`save()` for a new or refreshed quote, and `replace($orderRef, $expected, $new)` — a
+compare-and-set that writes only if the stored intent is still `$expected`. With it,
+`respondFor()` loads, matches, stores a change with `replace()` and dispatches events only if its
+`replace()` won. Two polls for the same order that run at once and match the same payment
+therefore dispatch one event, not two. `replace()` must be atomic for the order's row (one
+`UPDATE … WHERE`, or `lockForUpdate()` and the write in one transaction); extend
+`Testing\PaymentIntentStoreContractTestCase` to check your implementation.
 
 **Signed URLs** are the recommended secret:
 
@@ -147,12 +152,14 @@ Poll until `redirect` is set. `partial` and `wrong_asset` keep polling so a top-
 `expired` too, so a late payment is; only `settled` is terminal.
 
 Without a store, call `respond($intent, $orderRef)` and save `$result->intent` yourself when
-`$result->changed()`.
+`$result->changed()`. `respond()` cannot tell concurrent polls apart: each one that sees the
+change dispatches. Prefer `respondFor()`.
 
 ### Events
 
-Dispatched once, when a sync moves an order into the state — never for a poll that finds it where
-it was, and never for the quote simply running out:
+Dispatched when a sync moves an order into the state — never for a poll that finds it where it
+was, never for the quote simply running out, and through `respondFor()` only by the request whose
+`replace()` stored the change:
 
 | Event | State |
 |---|---|
@@ -162,6 +169,12 @@ it was, and never for the quote simply running out:
 
 Each carries `orderRef`, the new `intent`, the `previousIntent`, the `status` and the
 `previousState`. Order status, invoices and mails hang off these in your shop.
+
+**Make your listeners queued and idempotent.** The change is stored before the event is
+dispatched, so a synchronous listener that throws loses the event — the next poll sees nothing new
+and the order would stay unpaid in your shop. A queued listener (`ShouldQueue`) is retried by the
+queue; a retry can repeat work, hence idempotent. Inside a database transaction the events wait
+for the commit and are dropped on a rollback (`ShouldDispatchAfterCommit`).
 
 ## Tables and `migrate:fresh`
 
@@ -203,7 +216,8 @@ implementations and can be rebound the same way.
 
 The core ships a testing kit under `Hardcastle\LedgerDirect\Core\Testing\` (`FakeHttpClient`,
 `InMemoryCache`, `FrozenClock`, `RecordingLogger`, …); this package adds
-`Hardcastle\LedgerDirect\Laravel\Testing\InMemoryPaymentIntentStore`.
+`Hardcastle\LedgerDirect\Laravel\Testing\InMemoryPaymentIntentStore` and
+`PaymentIntentStoreContractTestCase`, the contract your own store has to keep.
 
 ```php
 $this->app->instance(LedgerDirectServiceProvider::HTTP_CLIENT, $http = new FakeHttpClient());
