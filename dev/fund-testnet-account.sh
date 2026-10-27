@@ -7,9 +7,14 @@
 # Needs curl and jq.
 set -euo pipefail
 
+# Every request is bounded, and so is the wait as a whole: a faucet or node
+# that keeps a connection open must not hold a CI job until GitHub's
+# six-hour limit.
+DEADLINE_SECONDS=60
+
 # Each failure stops here with its own message, not later in a test that
 # finds no account.
-if ! response=$(curl -sf -X POST https://faucet.altnet.rippletest.net/accounts); then
+if ! response=$(curl -sf --connect-timeout 5 --max-time 20 -X POST https://faucet.altnet.rippletest.net/accounts); then
   echo "The faucet request failed." >&2
   exit 1
 fi
@@ -21,8 +26,9 @@ if [ -z "$address" ]; then
   exit 1
 fi
 
-for _ in $(seq 1 30); do
-  funded=$(curl -sf -H 'Content-Type: application/json' https://s.altnet.rippletest.net:51234/ \
+SECONDS=0
+while [ "$SECONDS" -lt "$DEADLINE_SECONDS" ]; do
+  funded=$(curl -sf --connect-timeout 5 --max-time 10 -H 'Content-Type: application/json' https://s.altnet.rippletest.net:51234/ \
     -d "{\"method\":\"account_info\",\"params\":[{\"account\":\"$address\",\"ledger_index\":\"validated\"}]}" \
     | jq -r '.result.account_data.Account // empty' || true)
   if [ "$funded" = "$address" ]; then
@@ -32,5 +38,5 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 
-echo "Faucet account $address was not validated within 60 s." >&2
+echo "Faucet account $address was not validated within ${DEADLINE_SECONDS} s." >&2
 exit 1

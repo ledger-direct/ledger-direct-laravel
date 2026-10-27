@@ -156,6 +156,8 @@ jobs:
     name: Integration · XRPL testnet and price oracles
     if: github.event_name == 'workflow_dispatch' && inputs.integration
     runs-on: ubuntu-latest
+    # Live network: never wait for GitHub's six-hour default.
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -185,6 +187,7 @@ jobs:
     name: Acceptance · fresh Laravel ${{ matrix.laravel }} app on ${{ matrix.database }}
     if: github.event_name == 'workflow_dispatch' && inputs.integration
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
