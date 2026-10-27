@@ -7,11 +7,17 @@
 # Needs curl and jq.
 set -euo pipefail
 
-address=$(curl -sf -X POST https://faucet.altnet.rippletest.net/accounts \
-  | jq -r '.account.address // .account.classicAddress // empty')
+# Each failure stops here with its own message, not later in a test that
+# finds no account.
+if ! response=$(curl -sf -X POST https://faucet.altnet.rippletest.net/accounts); then
+  echo "The faucet request failed." >&2
+  exit 1
+fi
+
+address=$(jq -r '.account.address // .account.classicAddress // empty' <<<"$response")
 
 if [ -z "$address" ]; then
-  echo "The faucet returned no account." >&2
+  echo "The faucet returned no account: $response" >&2
   exit 1
 fi
 
