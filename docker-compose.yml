@@ -1,0 +1,48 @@
+services:
+  php:
+    build: ./docker
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      XDEBUG_MODE: "${XDEBUG_MODE:-off}"
+      LEDGER_DIRECT_TEST_MYSQL_HOST: mysql
+      LEDGER_DIRECT_TEST_MYSQL_PORT: 3306
+      LEDGER_DIRECT_TEST_MYSQL_DATABASE: ledger_direct
+      LEDGER_DIRECT_TEST_MYSQL_USERNAME: root
+      LEDGER_DIRECT_TEST_MYSQL_PASSWORD: root
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # Only for the repository contract test. 33306 on the host, because 3306 is
+  # taken by the shop stacks next door.
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ledger_direct
+    ports:
+      - "127.0.0.1:33306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-proot"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # For the PostgreSQL repository tests. 35432 on the host, 5432 is often taken.
+  # Run them on their own: with MySQL configured as well the Testbench suite
+  # takes MySQL, so `LEDGER_DIRECT_TEST_PGSQL_HOST=127.0.0.1 … vendor/bin/phpunit`
+  # from the host, without the MySQL variables.
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: ledger_direct
+    ports:
+      - "127.0.0.1:35432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

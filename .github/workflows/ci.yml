@@ -1,0 +1,235 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      integration:
+        description: 'Also run the integration suite against the XRPL testnet and the live price oracles'
+        type: boolean
+        default: false
+
+jobs:
+  test:
+    name: Laravel ${{ matrix.laravel }} · PHP ${{ matrix.php }} · ${{ matrix.stability }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { laravel: '12', testbench: '^10.0', php: '8.2', stability: prefer-lowest }
+          - { laravel: '12', testbench: '^10.0', php: '8.2', stability: prefer-stable }
+          - { laravel: '12', testbench: '^10.0', php: '8.3', stability: prefer-lowest }
+          - { laravel: '12', testbench: '^10.0', php: '8.3', stability: prefer-stable }
+          - { laravel: '12', testbench: '^10.0', php: '8.4', stability: prefer-lowest }
+          - { laravel: '12', testbench: '^10.0', php: '8.4', stability: prefer-stable }
+          - { laravel: '13', testbench: '^11.0', php: '8.3', stability: prefer-lowest }
+          - { laravel: '13', testbench: '^11.0', php: '8.3', stability: prefer-stable }
+          - { laravel: '13', testbench: '^11.0', php: '8.4', stability: prefer-lowest }
+          - { laravel: '13', testbench: '^11.0', php: '8.4', stability: prefer-stable }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite
+          coverage: none
+
+      - name: Pin Laravel ${{ matrix.laravel }}
+        run: composer require --dev --no-update --no-interaction "laravel/framework:^${{ matrix.laravel }}.0" "orchestra/testbench:${{ matrix.testbench }}"
+
+      - name: Install dependencies
+        run: composer update --${{ matrix.stability }} --prefer-dist --no-interaction --no-progress
+
+      - name: Installed versions
+        run: composer show | grep -E '^(laravel/framework|phpunit/phpunit|hardcastle/ledger-direct-core|brick/math|guzzlehttp/guzzle) '
+
+      - name: Run tests
+        run: vendor/bin/phpunit
+
+  mysql:
+    name: MySQL · repository contract and full suite
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: ledger_direct
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    env:
+      LEDGER_DIRECT_TEST_MYSQL_HOST: 127.0.0.1
+      LEDGER_DIRECT_TEST_MYSQL_PORT: 3306
+      LEDGER_DIRECT_TEST_MYSQL_DATABASE: ledger_direct
+      LEDGER_DIRECT_TEST_MYSQL_USERNAME: root
+      LEDGER_DIRECT_TEST_MYSQL_PASSWORD: root
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql
+          coverage: none
+
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-interaction --no-progress
+
+      # Nothing may skip here: a skipped contract test would pass silently.
+      # The PostgreSQL-only tests skip by design on this job.
+      - name: Run tests
+        run: vendor/bin/phpunit --fail-on-skipped --exclude-filter PgsqlDatabaseXrplTransactionRepositoryTest
+
+  pgsql:
+    name: PostgreSQL · repository contract and full suite
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: root
+          POSTGRES_DB: ledger_direct
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    env:
+      LEDGER_DIRECT_TEST_PGSQL_HOST: 127.0.0.1
+      LEDGER_DIRECT_TEST_PGSQL_PORT: 5432
+      LEDGER_DIRECT_TEST_PGSQL_DATABASE: ledger_direct
+      LEDGER_DIRECT_TEST_PGSQL_USERNAME: postgres
+      LEDGER_DIRECT_TEST_PGSQL_PASSWORD: root
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_pgsql
+          coverage: none
+
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-interaction --no-progress
+
+      # The whole suite runs on PostgreSQL here; the MySQL-only tests skip by
+      # design, everything else must run.
+      - name: Run tests
+        run: vendor/bin/phpunit --fail-on-skipped --exclude-filter MysqlDatabaseXrplTransactionRepositoryTest
+
+  static:
+    name: composer validate · PHPStan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Validate composer.json
+        run: composer validate --strict
+
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-interaction --no-progress
+
+      - name: PHPStan
+        run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress
+
+  integration:
+    name: Integration · XRPL testnet and price oracles
+    if: github.event_name == 'workflow_dispatch' && inputs.integration
+    runs-on: ubuntu-latest
+    # Live network: never wait for GitHub's six-hour default.
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Install dependencies
+        run: composer update --prefer-dist --no-interaction --no-progress
+
+      # A fresh account per run, see dev/fund-testnet-account.sh.
+      - name: Fund a testnet account
+        id: account
+        run: |
+          address=$(dev/fund-testnet-account.sh)
+          echo "address=$address" >> "$GITHUB_OUTPUT"
+
+      # --fail-on-skipped: a missing account must fail the job, not skip the sync test.
+      - name: Run integration suite
+        env:
+          LEDGER_DIRECT_TEST_XRPL_ACCOUNT: ${{ steps.account.outputs.address }}
+        run: vendor/bin/phpunit --testsuite integration --fail-on-skipped
+
+  acceptance:
+    name: Acceptance · fresh Laravel ${{ matrix.laravel }} app on ${{ matrix.database }}
+    if: github.event_name == 'workflow_dispatch' && inputs.integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        laravel: ['12', '13']
+        database: [sqlite, mysql, pgsql]
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: root
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    env:
+      LEDGER_DIRECT_TEST_MYSQL_HOST: 127.0.0.1
+      LEDGER_DIRECT_TEST_MYSQL_PORT: 3306
+      LEDGER_DIRECT_TEST_MYSQL_PASSWORD: root
+      LEDGER_DIRECT_TEST_PGSQL_HOST: 127.0.0.1
+      LEDGER_DIRECT_TEST_PGSQL_PORT: 5432
+      LEDGER_DIRECT_TEST_PGSQL_PASSWORD: root
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_sqlite, pdo_mysql, pdo_pgsql
+          coverage: none
+
+      - name: Accept in a fresh app
+        run: dev/acceptance.sh ${{ matrix.laravel }} ${{ matrix.database }}

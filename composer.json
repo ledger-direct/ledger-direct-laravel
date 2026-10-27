@@ -1,0 +1,72 @@
+{
+    "name": "hardcastle/ledger-direct-laravel",
+    "description": "LedgerDirect for Laravel - binds the LedgerDirect core (XRPL payments) into any Laravel 12/13 application",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "laravel",
+        "xrpl",
+        "xrp",
+        "rlusd",
+        "payments",
+        "crypto"
+    ],
+    "authors": [
+        {
+            "name": "Alexander Busse",
+            "homepage": "https://www.ledger-direct.com",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "hardcastle/ledger-direct-core": "^0.10",
+        "illuminate/cache": "^12.0 || ^13.0",
+        "illuminate/console": "^12.0 || ^13.0",
+        "illuminate/contracts": "^12.0 || ^13.0",
+        "illuminate/database": "^12.0 || ^13.0",
+        "illuminate/events": "^12.0 || ^13.0",
+        "illuminate/log": "^12.0 || ^13.0",
+        "illuminate/support": "^12.0 || ^13.0",
+        "guzzlehttp/guzzle": "^7.8.2 || ^8.0",
+        "guzzlehttp/psr7": "^2.6.3 || ^3.0",
+        "psr/clock": "^1.0"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.4",
+        "orchestra/testbench": "^10.0 || ^11.0",
+        "phpunit/phpunit": "^11.5.3 || ^12.0 || ^13.0"
+    },
+    "suggest": {
+        "phpunit/phpunit": "Required by Hardcastle\\LedgerDirect\\Laravel\\Testing\\PaymentIntentStoreContractTestCase, the contract test for PaymentIntentStore implementations"
+    },
+    "autoload": {
+        "psr-4": {
+            "Hardcastle\\LedgerDirect\\Laravel\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Hardcastle\\LedgerDirect\\Laravel\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Hardcastle\\LedgerDirect\\Laravel\\LedgerDirectServiceProvider"
+            ],
+            "aliases": {
+                "LedgerDirect": "Hardcastle\\LedgerDirect\\Laravel\\Facades\\LedgerDirect"
+            }
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse --memory-limit=1G"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
