@@ -8,10 +8,12 @@ use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Psr7\Request;
 use Hardcastle\LedgerDirect\Core\Payment\PaymentIntent;
 use Hardcastle\LedgerDirect\Core\Payment\PaymentStatus;
+use Hardcastle\LedgerDirect\Core\Port\XrplTransactionRepositoryInterface;
 use Hardcastle\LedgerDirect\Core\Testing\FakeHttpClient;
 use Hardcastle\LedgerDirect\Core\Testing\FrozenClock;
 use Hardcastle\LedgerDirect\Core\Testing\InMemoryCache;
 use Hardcastle\LedgerDirect\Core\Testing\RecordingLogger;
+use Hardcastle\LedgerDirect\Core\Xrpl\XrplTransaction;
 use Hardcastle\LedgerDirect\Laravel\Events\PaymentPartiallyReceived;
 use Hardcastle\LedgerDirect\Laravel\Events\PaymentReceivedInWrongAsset;
 use Hardcastle\LedgerDirect\Laravel\Events\PaymentSettled;
@@ -184,6 +186,39 @@ final class StatusResponderTest extends TestCase
 
         $body = json_decode((string) $this->http->lastRequest()?->getBody(), true);
         self::assertSame(self::ACCOUNT, $body['params'][0]['account']);
+    }
+
+    /**
+     * The same account and the same tag exist on testnet and mainnet. A
+     * merchant who switched networks still has testnet payments stored; one
+     * of them must not settle a mainnet order. Fixed in core 0.10.0 — the
+     * reason this package requires it.
+     */
+    public function testAPaymentFromTheOtherNetworkDoesNotSettle(): void
+    {
+        $this->fakeEvents();
+        $this->app->make(XrplTransactionRepositoryInterface::class)->saveTransactions([
+            new XrplTransaction(
+                network: 'testnet',
+                ledgerIndex: '100',
+                hash: 'HASH_TESTNET',
+                ctid: 'C000006400000001',
+                account: 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe',
+                destination: self::ACCOUNT,
+                destinationTag: 4242,
+                date: 800000000,
+                meta: ['delivered_amount' => '10000000'],
+                tx: [],
+            ),
+        ]);
+        $mainnetIntent = PaymentIntent::fromArray(['network' => 'mainnet'] + self::xrpIntent(10.0, expiry: self::NOW + 300)->toArray());
+        $this->http->queueResponse('xrplcluster.com', self::accountTx());
+
+        $result = $this->responder()->respond($mainnetIntent, 'order-main');
+
+        self::assertSame('waiting', $result->status->state());
+        self::assertNull($result->intent->hash);
+        Event::assertNothingDispatched();
     }
 
     public function testRespondForSavesBeforeTheEventAndOnlyWhenChanged(): void

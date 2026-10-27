@@ -20,7 +20,7 @@
     ],
     "require": {
         "php": "^8.2",
-        "hardcastle/ledger-direct-core": "^0.9",
+        "hardcastle/ledger-direct-core": "^0.10",
         "illuminate/cache": "^12.0 || ^13.0",
         "illuminate/console": "^12.0 || ^13.0",
         "illuminate/contracts": "^12.0 || ^13.0",

@@ -6,7 +6,9 @@ All notable changes to this package are documented here. The format follows
 
 ## [Unreleased]
 
-First release: the Laravel bridge over `hardcastle/ledger-direct-core` 0.9.
+First release: the Laravel bridge over `hardcastle/ledger-direct-core` 0.10. Requires 0.10 rather than
+0.9 for its fix that a payment from another network never settles an order (XRPL only; Stellar is not
+bound by this release).
 
 ### Added
 

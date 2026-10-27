@@ -13,7 +13,7 @@ same way. A shop integration (Bagisto first) sits on top of this package.
 |---|---|
 | Composer | `hardcastle/ledger-direct-laravel` |
 | Namespace | `Hardcastle\LedgerDirect\Laravel\` |
-| Requires | PHP 8.2+ · Laravel 12 (PHP 8.2–8.4) or Laravel 13 (PHP 8.3+) · core `^0.7` |
+| Requires | PHP 8.2+ · Laravel 12 (PHP 8.2–8.4) or Laravel 13 (PHP 8.3+) · core `^0.10` |
 | License | MIT |
 
 ## Installation

@@ -89,8 +89,9 @@ final class CommandsTest extends TestCase
     {
         $this->fakeHttp();
 
+        // The bridge's own wording; the core's reason follows it and is the core's to phrase.
         $this->artisan('ledger-direct:price', ['asset' => 'DOGE', 'currency' => 'EUR'])
-            ->expectsOutputToContain("Unsupported base_asset 'DOGE'")
+            ->expectsOutputToContain('Cannot price DOGE in EUR')
             ->assertExitCode(2);
     }
 }
