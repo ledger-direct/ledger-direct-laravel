@@ -7,10 +7,15 @@ namespace Hardcastle\LedgerDirect\Laravel\Tests;
 use Hardcastle\LedgerDirect\Core\LedgerDirect;
 use Hardcastle\LedgerDirect\Core\Port\ConfigProviderInterface;
 use Hardcastle\LedgerDirect\Core\Port\XrplTransactionRepositoryInterface;
+use Hardcastle\LedgerDirect\Core\Stellar\LedgerDirectStellar;
+use Hardcastle\LedgerDirect\Laravel\Chains\LedgerDirectChains;
+use Hardcastle\LedgerDirect\Laravel\Chains\UnsupportedChainException;
 use Hardcastle\LedgerDirect\Laravel\Clock\LaravelClock;
 use Hardcastle\LedgerDirect\Laravel\Config\InvalidConfigurationException;
 use Hardcastle\LedgerDirect\Laravel\Config\LaravelConfigProvider;
 use Hardcastle\LedgerDirect\Laravel\Facades\LedgerDirect as LedgerDirectFacade;
+use Hardcastle\LedgerDirect\Laravel\Facades\LedgerDirectStellar as LedgerDirectStellarFacade;
+use Hardcastle\LedgerDirect\Laravel\Repository\DatabaseStellarPaymentRepository;
 use Hardcastle\LedgerDirect\Laravel\Repository\DatabaseXrplTransactionRepository;
 use Illuminate\Support\Facades\Artisan;
 
@@ -34,6 +39,48 @@ final class ServiceProviderTest extends TestCase
         self::assertInstanceOf(LaravelClock::class, $root->clock());
         self::assertSame($root->transactionRepository(), $this->app->make(XrplTransactionRepositoryInterface::class));
         self::assertSame($root->configProvider(), $this->app->make(ConfigProviderInterface::class));
+    }
+
+    public function testTheStellarRootIsASingletonOnTheSameInfrastructure(): void
+    {
+        $stellar = $this->app->make(LedgerDirectStellar::class);
+        $xrpl = $this->app->make(LedgerDirect::class);
+
+        self::assertSame($stellar, $this->app->make(LedgerDirectStellar::class));
+        self::assertSame($stellar, LedgerDirectStellarFacade::getFacadeRoot());
+        self::assertInstanceOf(DatabaseStellarPaymentRepository::class, $stellar->paymentRepository());
+        self::assertSame($xrpl->configProvider(), $stellar->configProvider());
+        self::assertSame($xrpl->clock(), $stellar->clock());
+    }
+
+    /** One cache store for both roots, warned about once. */
+    public function testAnArrayCacheWarnsOnceForBothRoots(): void
+    {
+        $logger = $this->recordLogs();
+
+        $this->app->make(LedgerDirect::class);
+        $this->app->make(LedgerDirectStellar::class);
+
+        $warnings = array_filter($logger->records(), static fn (array $r): bool => $r['level'] === 'warning');
+        self::assertCount(1, $warnings);
+    }
+
+    public function testTheChainsPickTheRootByTheIntent(): void
+    {
+        $chains = $this->app->make(LedgerDirectChains::class);
+
+        self::assertSame($this->app->make(LedgerDirect::class), $chains->forIntent(self::xrpIntent(1.0)));
+        self::assertSame($this->app->make(LedgerDirectStellar::class), $chains->forIntent(self::xlmIntent(1.0)));
+        self::assertStringStartsWith('https://xrplf.org//send?', $chains->paymentUri(self::xrpIntent(1.0), '1'));
+        self::assertStringStartsWith('web+stellar:pay?destination=' . self::STELLAR_ACCOUNT, $chains->paymentUri(self::xlmIntent(1.0), '1'));
+        self::assertStringContainsString('memo=4242', $chains->paymentUri(self::xlmIntent(1.0), '1'));
+    }
+
+    public function testAnUnknownChainHasNoRoot(): void
+    {
+        $this->expectException(UnsupportedChainException::class);
+
+        $this->app->make(LedgerDirectChains::class)->forChain('XAHAU');
     }
 
     public function testTheRepositoryUsesTheConfiguredConnection(): void
@@ -129,7 +176,16 @@ final class ServiceProviderTest extends TestCase
         $output = Artisan::output();
 
         self::assertStringContainsString('LedgerDirect', $output);
-        self::assertStringContainsString('rHb9CJ…tyTh', $output);
-        self::assertStringContainsString('testnet', $output);
+        self::assertMatchesRegularExpression('/XRP Ledger \\.+ testnet · rHb9CJ…tyTh · XRP/u', $output);
+        self::assertMatchesRegularExpression('/Stellar \\.+ off/u', $output);
+    }
+
+    public function testTheAboutCommandShowsAnEnabledStellar(): void
+    {
+        $this->enableStellar(['EURC' => true]);
+
+        Artisan::call('about', ['--only' => 'ledgerdirect']);
+
+        self::assertMatchesRegularExpression('/Stellar \\.+ testnet · GAHK7E…DB4A · XLM, EURC/u', Artisan::output());
     }
 }

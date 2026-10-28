@@ -11,9 +11,10 @@ use Illuminate\Contracts\Config\Repository;
 /**
  * Reads config/ledger-direct.php for the core.
  *
- * The core names chains in upper case ('XRPL'); the config file keys them in
- * lower case ('xrpl'), one block per chain, so a further chain is a further
- * block and nothing else moves.
+ * Chains and assets come from the core's ChainCatalog, never from a list of
+ * the bridge's own: the config block of a chain is keyed by its name in lower
+ * case ('XRPL' → 'xrpl', 'STELLAR' → 'stellar'), and a chain the catalog
+ * gains needs a block, nothing else here.
  *
  * Every value is validated when it is read, not at boot: an application
  * that has not configured LedgerDirect yet must still boot, run migrations
@@ -25,27 +26,87 @@ final class LaravelConfigProvider implements ConfigProviderInterface
     public const QUOTE_EXPIRY_MIN = 60;
     public const QUOTE_EXPIRY_MAX = 3600;
 
-    private const NETWORKS = ['mainnet', 'testnet'];
-
-    /** The core's chain name => the key of its block under `chains`. */
-    private const CHAIN_KEYS = [
-        'XRPL' => 'xrpl',
-    ];
+    /**
+     * Enabled unless the config says otherwise — only for the XRP Ledger, so
+     * a config file published by 0.1, which has no `enabled` key, keeps
+     * taking payments. Every chain added later is opt-in.
+     */
+    private const ENABLED_BY_DEFAULT = [ChainCatalog::XRPL];
 
     public function __construct(
         private readonly Repository $config,
     ) {
     }
 
+    /**
+     * Whether the chain takes payments. A chain without a config block is
+     * off — a config file published before the chain existed has none.
+     */
+    public function isChainEnabled(string $chain): bool
+    {
+        if (!ChainCatalog::has($chain)) {
+            return false;
+        }
+
+        $block = $this->config->get('ledger-direct.' . self::chainKey($chain));
+
+        if (!is_array($block)) {
+            return false;
+        }
+
+        $enabled = $block['enabled'] ?? in_array($chain, self::ENABLED_BY_DEFAULT, true);
+
+        return filter_var($enabled, FILTER_VALIDATE_BOOL);
+    }
+
+    /**
+     * The enabled chains, in catalog order — e.g. ['XRPL', 'STELLAR'].
+     *
+     * @return list<string>
+     */
+    public function enabledChains(): array
+    {
+        $chains = [];
+
+        foreach (ChainCatalog::chains() as $descriptor) {
+            if ($this->isChainEnabled($descriptor->chain)) {
+                $chains[] = $descriptor->chain;
+            }
+        }
+
+        return $chains;
+    }
+
+    /**
+     * The chains this installation has a config block for, enabled or not,
+     * in the core's naming — e.g. ['XRPL', 'STELLAR'].
+     *
+     * @return list<string>
+     */
+    public function configuredChains(): array
+    {
+        $chains = [];
+
+        foreach (ChainCatalog::chains() as $descriptor) {
+            if (is_array($this->config->get('ledger-direct.' . self::chainKey($descriptor->chain)))) {
+                $chains[] = $descriptor->chain;
+            }
+        }
+
+        return $chains;
+    }
+
     public function getNetwork(string $chain): string
     {
-        $key = $this->chainKey($chain) . '.network';
+        $key = $this->knownChainKey($chain) . '.network';
         $network = $this->config->get('ledger-direct.' . $key);
+        $networks = ChainCatalog::chain($chain)->networks;
 
-        if (!is_string($network) || !in_array($network, self::NETWORKS, true)) {
+        if (!is_string($network) || !in_array($network, $networks, true)) {
             throw new InvalidConfigurationException(sprintf(
-                'LedgerDirect: ledger-direct.%s must be "mainnet" or "testnet", got %s. Set %s in your .env.',
+                'LedgerDirect: ledger-direct.%s must be one of "%s", got %s. Set %s in your .env.',
                 $key,
+                implode('", "', $networks),
                 self::describe($network),
                 self::envName($chain, 'NETWORK'),
             ));
@@ -56,25 +117,27 @@ final class LaravelConfigProvider implements ConfigProviderInterface
 
     public function getDestinationAccount(string $chain): string
     {
-        $key = $this->chainKey($chain) . '.destination_account';
+        $key = $this->knownChainKey($chain) . '.destination_account';
         $account = $this->config->get('ledger-direct.' . $key);
+        $descriptor = ChainCatalog::chain($chain);
 
         if ($account === null || $account === '') {
             throw new InvalidConfigurationException(sprintf(
-                'LedgerDirect: no receiving account configured. Set %s in your .env to your %s address (ledger-direct.%s).',
+                'LedgerDirect: no receiving account configured for %s. Set %s in your .env (ledger-direct.%s).',
+                $descriptor->label,
                 self::envName($chain, 'ACCOUNT'),
-                $chain,
                 $key,
             ));
         }
 
-        // The core's format check (ChainCatalog): catches a pasted X-address,
-        // a Stellar G-key, a truncated value or a trailing newline. Not a
+        // The core's format check: catches an address of the other chain, a
+        // pasted X-address, a truncated value or a trailing newline. Not a
         // checksum — that is a core ticket, and arrives here with the core.
-        if (!is_string($account) || !ChainCatalog::chain($chain)->isValidAccount($account)) {
+        if (!is_string($account) || !$descriptor->isValidAccount($account)) {
             throw new InvalidConfigurationException(sprintf(
-                'LedgerDirect: ledger-direct.%s is not a classic XRPL address (r…), got %s. Check %s in your .env.',
+                'LedgerDirect: ledger-direct.%s is not a valid %s receiving account, got %s. Check %s in your .env.',
                 $key,
+                $descriptor->label,
                 self::describe($account),
                 self::envName($chain, 'ACCOUNT'),
             ));
@@ -84,12 +147,17 @@ final class LaravelConfigProvider implements ConfigProviderInterface
     }
 
     /**
-     * Only an explicit `true` enables an asset. An asset the config does not
+     * True only for an enabled chain, an asset the catalog lists for it, and
+     * an explicit `true` in its config block. An asset the config does not
      * list is off — stablecoins are opt-in, and so is anything added later.
      */
     public function isAssetEnabled(string $chain, string $baseAsset): bool
     {
-        $assets = $this->config->get('ledger-direct.' . $this->chainKey($chain) . '.assets', []);
+        if (!$this->isChainEnabled($chain) || !ChainCatalog::chain($chain)->hasAsset($baseAsset)) {
+            return false;
+        }
+
+        $assets = $this->config->get('ledger-direct.' . self::chainKey($chain) . '.assets', []);
 
         return is_array($assets) && ($assets[$baseAsset] ?? false) === true;
     }
@@ -115,43 +183,32 @@ final class LaravelConfigProvider implements ConfigProviderInterface
     }
 
     /**
-     * The chains this installation has a config block for, in the core's
-     * naming — e.g. ['XRPL'].
-     *
-     * @return list<string>
+     * Maps a CLI-style chain name ('xrpl', 'stellar') to the core's, or null
+     * for a chain the core does not know.
      */
-    public function configuredChains(): array
+    public static function coreChainName(string $name): ?string
     {
-        $blocks = $this->config->get('ledger-direct.chains', []);
-        $chains = [];
+        $chain = strtoupper($name);
 
-        foreach (self::CHAIN_KEYS as $chain => $key) {
-            if (is_array($blocks) && isset($blocks[$key])) {
-                $chains[] = $chain;
-            }
+        return ChainCatalog::has($chain) ? $chain : null;
+    }
+
+    /** The config path of a chain's block, below `ledger-direct.`. */
+    public static function chainKey(string $chain): string
+    {
+        return 'chains.' . strtolower($chain);
+    }
+
+    private function knownChainKey(string $chain): string
+    {
+        if (!ChainCatalog::has($chain)) {
+            throw new InvalidConfigurationException(sprintf(
+                'LedgerDirect: this version of the core does not know the chain "%s".',
+                $chain,
+            ));
         }
 
-        return $chains;
-    }
-
-    /**
-     * Maps a CLI-style chain name ('xrpl') to the core's ('XRPL').
-     */
-    public static function coreChainName(string $configKey): ?string
-    {
-        $chain = array_search(strtolower($configKey), self::CHAIN_KEYS, true);
-
-        return $chain === false ? null : $chain;
-    }
-
-    private function chainKey(string $chain): string
-    {
-        $key = self::CHAIN_KEYS[$chain] ?? throw new InvalidConfigurationException(sprintf(
-            'LedgerDirect: this version of the Laravel bridge does not support the chain "%s".',
-            $chain,
-        ));
-
-        return 'chains.' . $key;
+        return self::chainKey($chain);
     }
 
     private static function envName(string $chain, string $suffix): string

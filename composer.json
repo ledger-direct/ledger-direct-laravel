@@ -56,7 +56,8 @@
                 "Hardcastle\\LedgerDirect\\Laravel\\LedgerDirectServiceProvider"
             ],
             "aliases": {
-                "LedgerDirect": "Hardcastle\\LedgerDirect\\Laravel\\Facades\\LedgerDirect"
+                "LedgerDirect": "Hardcastle\\LedgerDirect\\Laravel\\Facades\\LedgerDirect",
+                "LedgerDirectStellar": "Hardcastle\\LedgerDirect\\Laravel\\Facades\\LedgerDirectStellar"
             }
         }
     },

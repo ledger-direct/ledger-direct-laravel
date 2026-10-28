@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Hardcastle\LedgerDirect\Laravel\Tests\Console;
 
 use GuzzleHttp\Psr7\Response;
+use Hardcastle\LedgerDirect\Core\Stellar\Schema as StellarSchema;
 use Hardcastle\LedgerDirect\Core\Xrpl\Schema;
 use Hardcastle\LedgerDirect\Laravel\Tests\TestCase;
 use Illuminate\Support\Facades\DB;
@@ -66,9 +67,64 @@ final class CommandsTest extends TestCase
 
     public function testSyncRejectsAnUnknownChain(): void
     {
-        $this->artisan('ledger-direct:sync', ['--chain' => 'stellar'])
-            ->expectsOutputToContain('Unsupported chain "stellar"')
+        $this->artisan('ledger-direct:sync', ['--chain' => 'xahau'])
+            ->expectsOutputToContain('Unsupported chain "xahau". Supported: xrpl, stellar.')
             ->assertExitCode(2);
+    }
+
+    public function testSyncRefusesADisabledChain(): void
+    {
+        $this->artisan('ledger-direct:sync', ['--chain' => 'stellar'])
+            ->expectsOutputToContain('Stellar is not enabled')
+            ->assertFailed();
+    }
+
+    public function testSyncOfStellarStoresThePaymentsFromHorizon(): void
+    {
+        $this->enableStellar();
+        $http = $this->fakeHttp();
+        $http->queueResponse('/payments', self::horizonPayments([
+            self::stellarPayment('TX1', 1001, '5.0000000', ledger: 2000),
+            self::stellarPayment('TX2', 1002, '1.5000000', ledger: 2001),
+        ]));
+
+        $this->artisan('ledger-direct:sync', ['--chain' => 'stellar'])
+            ->expectsOutputToContain('Synced ' . self::STELLAR_ACCOUNT . ' on STELLAR testnet')
+            ->assertSuccessful();
+
+        self::assertCount(1, $http->sentRequests());
+        self::assertSame(['1001', '1002'], DB::table(StellarSchema::TABLE_PAYMENT)->orderBy('payment_id')->pluck('memo_id')->map(static fn ($m): string => (string) $m)->all());
+    }
+
+    /** Without --chain, the scheduled sync covers every enabled chain. */
+    public function testSyncWithoutAChainSyncsEveryEnabledChain(): void
+    {
+        $this->enableStellar();
+        $http = $this->fakeHttp();
+        $http->queueResponse('s.altnet.rippletest.net', self::accountTx());
+        $http->queueResponse('/payments', self::horizonPayments());
+
+        $this->artisan('ledger-direct:sync')
+            ->expectsOutputToContain('on XRPL testnet')
+            ->expectsOutputToContain('on STELLAR testnet')
+            ->assertSuccessful();
+
+        self::assertCount(2, $http->sentRequests());
+    }
+
+    public function testOneChainFailingDoesNotStopTheOther(): void
+    {
+        $this->enableStellar();
+        $http = $this->fakeHttp();
+        $http->queueResponse('s.altnet.rippletest.net', new Response(503));
+        $http->queueResponse('/payments', self::horizonPayments([self::stellarPayment('TX1', 1001, '5.0000000')]));
+
+        $this->artisan('ledger-direct:sync')
+            ->expectsOutputToContain('XRP Ledger: ')
+            ->expectsOutputToContain('on STELLAR testnet')
+            ->assertFailed();
+
+        self::assertSame(1, DB::table(StellarSchema::TABLE_PAYMENT)->count());
     }
 
     public function testPriceShowsTheRate(): void
@@ -83,6 +139,53 @@ final class CommandsTest extends TestCase
             ->expectsOutputToContain('1 XRP = 0.5 USD')
             ->expectsOutputToContain('2 XRP')
             ->assertSuccessful();
+    }
+
+    public function testPriceOfXlmUsesTheStellarOracleSet(): void
+    {
+        $http = $this->fakeHttp();
+        $http->queueResponse('api.binance.com', new Response(200, [], '{"price":"0.25"}'));
+        $http->queueResponse('api.coingecko.com', new Response(200, [], '{"stellar":{"eur":0.25}}'));
+        $http->queueResponse('api.kraken.com', new Response(200, [], '{"result":{"XXLMZEUR":{"c":["0.25","100"]}}}'));
+
+        $this->artisan('ledger-direct:price', ['asset' => 'xlm', 'currency' => 'eur'])
+            ->expectsOutputToContain('XLM/EUR')
+            ->expectsOutputToContain('Stellar')
+            ->expectsOutputToContain('1 XLM = 0.25 EUR')
+            ->expectsOutputToContain('4 XLM')
+            ->assertSuccessful();
+    }
+
+    /** PHP prints a tiny float in exponent form; the rate must still show exactly, not as 0. */
+    public function testPriceShowsATinyRateExactly(): void
+    {
+        $http = $this->fakeHttp();
+        $http->queueResponse('api.binance.com', new Response(200, [], '{"price":"0.0000000000004"}'));
+        $http->queueResponse('api.coingecko.com', new Response(200, [], '{"stellar":{"eur":0.0000000000004}}'));
+        $http->queueResponse('api.kraken.com', new Response(200, [], '{"result":{"XXLMZEUR":{"c":["0.0000000000004","100"]}}}'));
+
+        $this->artisan('ledger-direct:price', ['asset' => 'XLM', 'currency' => 'EUR'])
+            ->expectsOutputToContain('1 XLM = 0.0000000000004 EUR')
+            ->assertSuccessful();
+    }
+
+    /** EURC is pegged to the euro: no oracle is asked. */
+    public function testPriceOfEurcInEuroTakesThePeg(): void
+    {
+        $this->fakeHttp();
+
+        $this->artisan('ledger-direct:price', ['asset' => 'EURC', 'currency' => 'EUR'])
+            ->expectsOutputToContain('1 EURC = 1 EUR')
+            ->assertSuccessful();
+    }
+
+    public function testPriceRefusesAnAssetTheNamedChainDoesNotList(): void
+    {
+        $this->fakeHttp();
+
+        $this->artisan('ledger-direct:price', ['asset' => 'XLM', 'currency' => 'EUR', '--chain' => 'xrpl'])
+            ->expectsOutputToContain('no chain lists XLM on the chain "xrpl"')
+            ->assertExitCode(2);
     }
 
     public function testPriceNamesAnUnsupportedAsset(): void

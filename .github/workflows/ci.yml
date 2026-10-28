@@ -89,7 +89,7 @@ jobs:
       # Nothing may skip here: a skipped contract test would pass silently.
       # The PostgreSQL-only tests skip by design on this job.
       - name: Run tests
-        run: vendor/bin/phpunit --fail-on-skipped --exclude-filter PgsqlDatabaseXrplTransactionRepositoryTest
+        run: vendor/bin/phpunit --fail-on-skipped --exclude-filter 'Pgsql\w+Test'
 
   pgsql:
     name: PostgreSQL · repository contract and full suite
@@ -129,7 +129,7 @@ jobs:
       # The whole suite runs on PostgreSQL here; the MySQL-only tests skip by
       # design, everything else must run.
       - name: Run tests
-        run: vendor/bin/phpunit --fail-on-skipped --exclude-filter MysqlDatabaseXrplTransactionRepositoryTest
+        run: vendor/bin/phpunit --fail-on-skipped --exclude-filter 'Mysql\w+Test'
 
   static:
     name: composer validate · PHPStan
@@ -177,10 +177,17 @@ jobs:
           address=$(dev/fund-testnet-account.sh)
           echo "address=$address" >> "$GITHUB_OUTPUT"
 
+      - name: Fund a Stellar testnet account
+        id: stellar
+        run: |
+          address=$(dev/fund-stellar-testnet-account.sh)
+          echo "address=$address" >> "$GITHUB_OUTPUT"
+
       # --fail-on-skipped: a missing account must fail the job, not skip the sync test.
       - name: Run integration suite
         env:
           LEDGER_DIRECT_TEST_XRPL_ACCOUNT: ${{ steps.account.outputs.address }}
+          LEDGER_DIRECT_TEST_STELLAR_ACCOUNT: ${{ steps.stellar.outputs.address }}
         run: vendor/bin/phpunit --testsuite integration --fail-on-skipped
 
   acceptance:
