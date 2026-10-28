@@ -6,6 +6,8 @@ All notable changes to this package are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] – 2026-10-28
+
 Stellar as the second chain, on core 0.10.
 
 ### Added
@@ -81,3 +83,7 @@ bound by this release).
   processes covers it.
 - The receiving address is checked with the core's `ChainCatalog` instead of a pattern of its own,
   which also rejects a trailing newline.
+
+[Unreleased]: https://github.com/ledger-direct/ledger-direct-laravel/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/ledger-direct/ledger-direct-laravel/compare/0.1.0...0.2.0
+[0.1.0]: https://github.com/ledger-direct/ledger-direct-laravel/releases/tag/0.1.0
