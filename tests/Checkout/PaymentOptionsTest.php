@@ -70,6 +70,15 @@ final class PaymentOptionsTest extends TestCase
         self::assertStringContainsString('chain enabled but not usable', $this->lastWarning());
     }
 
+    public function testEnabledXahauAddsXahWithoutARequest(): void
+    {
+        $this->enableXahau();
+
+        self::assertSame(['xrp-payment', 'xahau-xah-payment'], $this->types());
+        self::assertSame('XAH (Xahau)', $this->paymentOptions()->forType('xahau-xah-payment')?->label());
+        self::assertSame([], $this->http->sentRequests());
+    }
+
     public function testForTypeFindsAnAvailableOption(): void
     {
         $this->enableStellar();

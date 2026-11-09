@@ -11,7 +11,7 @@ return [
     |
     | One block per chain the core knows (Core\ChainCatalog). A chain takes
     | payments only while it is enabled; the XRP Ledger is enabled by default,
-    | so an installation from 0.1 keeps working, Stellar is opt-in.
+    | so an installation from 0.1 keeps working, every other chain is opt-in.
     |
     | There are no issuer addresses here, on purpose: which issuer a USDC,
     | RLUSD or EURC payment has to come from is fixed in the core's registries
@@ -52,6 +52,22 @@ return [
                 'XLM' => true,
                 'USDC' => false,
                 'EURC' => false,
+            ],
+        ],
+
+        'xahau' => [
+            'enabled' => (bool) env('LEDGER_DIRECT_XAHAU_ENABLED', false),
+
+            // mainnet | testnet
+            'network' => env('LEDGER_DIRECT_XAHAU_NETWORK', 'testnet'),
+
+            // Your receiving account, a classic address starting with "r". Use
+            // one of its own: the same keys open the same address on the XRP
+            // Ledger and on Xahau, and a warning is logged if both are the same.
+            'destination_account' => env('LEDGER_DIRECT_XAHAU_ACCOUNT'),
+
+            'assets' => [
+                'XAH' => true,
             ],
         ],
     ],

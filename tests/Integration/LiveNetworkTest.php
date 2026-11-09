@@ -78,4 +78,33 @@ final class LiveNetworkTest extends TestCase
         self::assertTrue(LedgerDirectStellar::accountInspector()->accountExists($account, 'testnet'));
         self::assertFalse(LedgerDirectStellar::accountInspector()->accountExists(StellarKeys::randomPublicKey(), 'testnet'), 'a fresh key has no account');
     }
+
+    public function testPriceOfXahAsksTheRealOracles(): void
+    {
+        $this->artisan('ledger-direct:price', ['asset' => 'XAH', 'currency' => 'USD'])
+            ->expectsOutputToContain('XAH/USD')
+            ->assertSuccessful();
+    }
+
+    /** Against a faucet-funded account (LEDGER_DIRECT_TEST_XAHAU_ACCOUNT, dev/fund-testnet-account.sh xahau). */
+    public function testXahauSyncReadsTheRealTestnet(): void
+    {
+        $account = getenv('LEDGER_DIRECT_TEST_XAHAU_ACCOUNT');
+
+        if ($account === false || $account === '') {
+            self::markTestSkipped('LEDGER_DIRECT_TEST_XAHAU_ACCOUNT is not set.');
+        }
+
+        $this->createTables();
+        $this->enableXahau();
+        $this->app['config']->set('ledger-direct.chains.xahau.destination_account', $account);
+
+        $this->artisan('ledger-direct:sync', ['--chain' => 'xahau'])->assertSuccessful();
+        $this->artisan('ledger-direct:sync', ['--chain' => 'xahau'])->assertSuccessful();
+
+        $hashes = DB::table(Schema::TABLE_XAHAU_TX)->pluck('hash');
+        self::assertGreaterThan(0, $hashes->count(), 'a funded account has at least its funding payment');
+        self::assertSame($hashes->count(), $hashes->unique()->count(), 'a second sync stores nothing twice');
+        self::assertSame(0, DB::table(Schema::TABLE_TX)->count(), 'nothing lands in the XRP Ledger table');
+    }
 }

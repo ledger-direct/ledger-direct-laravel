@@ -13,7 +13,7 @@ use Illuminate\Contracts\Config\Repository;
  *
  * Chains and assets come from the core's ChainCatalog, never from a list of
  * the bridge's own: the config block of a chain is keyed by its name in lower
- * case ('XRPL' → 'xrpl', 'STELLAR' → 'stellar'), and a chain the catalog
+ * case ('XRPL' → 'xrpl', 'XAHAU' → 'xahau'), and a chain the catalog
  * gains needs a block, nothing else here.
  *
  * Every value is validated when it is read, not at boot: an application
@@ -94,6 +94,30 @@ final class LaravelConfigProvider implements ConfigProviderInterface
         }
 
         return $chains;
+    }
+
+    /**
+     * Receiving accounts configured on more than one enabled chain, as
+     * account => chains. Only the XRP Ledger and Xahau share an address
+     * format, and the same keys open the same address on both. Valid, so it
+     * can only be warned about: a payment sent on the wrong chain then
+     * reaches the merchant's account but never an order.
+     *
+     * @return array<string, list<string>>
+     */
+    public function accountsOnSeveralChains(): array
+    {
+        $chains = [];
+
+        foreach ($this->enabledChains() as $chain) {
+            $account = $this->config->get('ledger-direct.' . self::chainKey($chain) . '.destination_account');
+
+            if (is_string($account) && $account !== '') {
+                $chains[$account][] = $chain;
+            }
+        }
+
+        return array_filter($chains, static fn (array $sharing): bool => count($sharing) > 1);
     }
 
     public function getNetwork(string $chain): string

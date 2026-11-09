@@ -1,6 +1,6 @@
 {
     "name": "hardcastle/ledger-direct-laravel",
-    "description": "LedgerDirect for Laravel - binds the LedgerDirect core (XRPL payments) into any Laravel 12/13 application",
+    "description": "LedgerDirect for Laravel - binds the LedgerDirect core (payments on the XRP Ledger, Stellar and Xahau) into any Laravel 12/13 application",
     "type": "library",
     "license": "MIT",
     "keywords": [
@@ -20,7 +20,7 @@
     ],
     "require": {
         "php": "^8.2",
-        "hardcastle/ledger-direct-core": "^0.10",
+        "hardcastle/ledger-direct-core": "^0.11",
         "illuminate/cache": "^12.0 || ^13.0",
         "illuminate/console": "^12.0 || ^13.0",
         "illuminate/contracts": "^12.0 || ^13.0",
@@ -57,7 +57,8 @@
             ],
             "aliases": {
                 "LedgerDirect": "Hardcastle\\LedgerDirect\\Laravel\\Facades\\LedgerDirect",
-                "LedgerDirectStellar": "Hardcastle\\LedgerDirect\\Laravel\\Facades\\LedgerDirectStellar"
+                "LedgerDirectStellar": "Hardcastle\\LedgerDirect\\Laravel\\Facades\\LedgerDirectStellar",
+                "LedgerDirectXahau": "Hardcastle\\LedgerDirect\\Laravel\\Facades\\LedgerDirectXahau"
             }
         }
     },

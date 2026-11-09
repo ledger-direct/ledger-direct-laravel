@@ -12,8 +12,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * The migrations against what the core says the tables are — the XRPL ones
- * from Xrpl\Schema, the Stellar ones from Stellar\Schema. Runs on SQLite,
+ * The migrations against what the core says the tables are — the XRPL and
+ * Xahau ones from Xrpl\Schema, the Stellar ones from Stellar\Schema. Runs on SQLite,
  * and on MySQL or PostgreSQL when the suite is pointed at one — only on
  * MySQL are the unsigned flags visible.
  */
@@ -22,6 +22,8 @@ final class MigrationTest extends TestCase
     private Migration $migration;
 
     private Migration $stellarMigration;
+
+    private Migration $xahauMigration;
 
     protected function setUp(): void
     {
@@ -35,6 +37,8 @@ final class MigrationTest extends TestCase
         $this->migration->up();
         $this->stellarMigration = require __DIR__ . '/../../database/migrations/2026_10_27_000000_create_ledger_direct_stellar_tables.php';
         $this->stellarMigration->up();
+        $this->xahauMigration = require __DIR__ . '/../../database/migrations/2026_11_09_000000_create_ledger_direct_xahau_tables.php';
+        $this->xahauMigration->up();
     }
 
     /**
@@ -42,7 +46,7 @@ final class MigrationTest extends TestCase
      */
     private static function coreTables(): array
     {
-        return CoreSchema::tables() + StellarSchema::tables();
+        return CoreSchema::tables() + StellarSchema::tables() + CoreSchema::tables('XAHAU');
     }
 
     public function testTheColumnsAreTheCoreSchema(): void
@@ -117,6 +121,8 @@ final class MigrationTest extends TestCase
         self::assertContains('app_ledger_direct_xrpl_destination_tag', $tables);
         self::assertContains('app_ledger_direct_stellar_payment', $tables);
         self::assertContains('app_ledger_direct_stellar_memo', $tables);
+        self::assertContains('app_ledger_direct_xahau_tx', $tables);
+        self::assertContains('app_ledger_direct_xahau_destination_tag', $tables);
     }
 
     public function testTheUnsignedRangeFitsOnEveryDriver(): void
@@ -159,6 +165,22 @@ final class MigrationTest extends TestCase
 
         self::assertTrue(Schema::hasTable(CoreSchema::TABLE_TX));
         self::assertSame(123, (int) DB::table(CoreSchema::TABLE_DESTINATION_TAG)->value('sequence'));
+    }
+
+    public function testXahauDownKeepsTheCounterAndLeavesTheXrplTablesAlone(): void
+    {
+        DB::table(CoreSchema::TABLE_XAHAU_DESTINATION_TAG)->insert(['destination_account' => 'rDest', 'sequence' => 77]);
+
+        $this->xahauMigration->down();
+
+        self::assertFalse(Schema::hasTable(CoreSchema::TABLE_XAHAU_TX));
+        self::assertTrue(Schema::hasTable(CoreSchema::TABLE_XAHAU_DESTINATION_TAG));
+        self::assertTrue(Schema::hasTable(CoreSchema::TABLE_TX), 'the XRP Ledger table is not touched');
+
+        $this->xahauMigration->up();
+
+        self::assertTrue(Schema::hasTable(CoreSchema::TABLE_XAHAU_TX));
+        self::assertSame(77, (int) DB::table(CoreSchema::TABLE_XAHAU_DESTINATION_TAG)->value('sequence'));
     }
 
     /** A stranger's memo id may be any uint64; the column must take the largest exactly. */

@@ -6,6 +6,25 @@ All notable changes to this package are documented here. The format follows
 
 ## [Unreleased]
 
+Xahau as the third chain, on core 0.11.
+
+### Added
+
+- `chains.xahau` in the config (opt-in, `LEDGER_DIRECT_XAHAU_*`).
+- A root for Xahau: a second `Core\LedgerDirect` created for the chain, on its own tables, with the
+  facade and alias `LedgerDirectXahau` and the container keys `XAHAU_ROOT` and `XAHAU_REPOSITORY`.
+  `LedgerDirectChains`, `StatusResponder`, `PaymentOptions`, the commands and `about` serve it.
+- A third publishable migration creating `ledger_direct_xahau_tx` and
+  `ledger_direct_xahau_destination_tag`; `down()` keeps the tag counter.
+- A logged warning, and a line in `about`, when the same receiving account is configured on the XRP
+  Ledger and on Xahau: valid, so it cannot be refused, but a payment on the wrong chain reaches
+  no order.
+
+### Changed
+
+- Requires core `^0.11`. A receiving account is now checked by checksum as well as format, so a
+  mistyped address is refused; the core's other 0.11 fixes come with it.
+
 ## [0.2.0] – 2026-10-28
 
 Stellar as the second chain, on core 0.10.
