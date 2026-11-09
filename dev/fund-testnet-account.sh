@@ -45,6 +45,11 @@ while :; do
     exit 1
   fi
 
+  if ! jq -e . >/dev/null 2>&1 <<<"$response"; then
+    echo "The $chain faucet did not answer with JSON." >&2
+    exit 1
+  fi
+
   wait=$(jq -r '((.error // "") | capture("wait (?<s>[0-9]+) second").s)? // empty' <<<"$response")
 
   if [ -z "$wait" ]; then

@@ -154,9 +154,9 @@ final class LaravelConfigProvider implements ConfigProviderInterface
             ));
         }
 
-        // The core's format check: catches an address of the other chain, a
-        // pasted X-address, a truncated value or a trailing newline. Not a
-        // checksum — that is a core ticket, and arrives here with the core.
+        // The core's check, format and checksum: catches an address of the
+        // other chain, a pasted X-address, a truncated value, a trailing
+        // newline and a mistyped character.
         if (!is_string($account) || !$descriptor->isValidAccount($account)) {
             throw new InvalidConfigurationException(sprintf(
                 'LedgerDirect: ledger-direct.%s is not a valid %s receiving account, got %s. Check %s in your .env.',

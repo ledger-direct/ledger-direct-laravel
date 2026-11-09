@@ -325,9 +325,9 @@ final class LedgerDirectServiceProvider extends ServiceProvider
 
         if ($configProvider instanceof LaravelConfigProvider) {
             foreach ($configProvider->accountsOnSeveralChains() as $account => $chains) {
-                $section['Shared account'] = sprintf(
-                    '<fg=yellow;options=bold>%s on %s: use one account per chain</>',
-                    substr($account, 0, 6) . '…' . substr($account, -4),
+                $short = substr($account, 0, 6) . '…' . substr($account, -4);
+                $section['Shared account ' . $short] = sprintf(
+                    '<fg=yellow;options=bold>on %s: use one account per chain</>',
                     implode(', ', $chains),
                 );
             }

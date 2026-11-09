@@ -10,6 +10,7 @@ use Hardcastle\LedgerDirect\Core\Xrpl\Schema;
 use Hardcastle\LedgerDirect\Core\Xrpl\XrplTransaction;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
+use InvalidArgumentException;
 use JsonException;
 use UnexpectedValueException;
 
@@ -40,8 +41,11 @@ final class DatabaseXrplTransactionRepository implements XrplTransactionReposito
         private readonly Connection $connection,
         string $chain = ChainCatalog::XRPL,
     ) {
-        // The core's order: the transaction table, then the tag counter.
-        [$transactionTable, $counterTable] = array_keys(Schema::tables($chain));
+        [$transactionTable, $counterTable] = match ($chain) {
+            ChainCatalog::XRPL => [Schema::TABLE_TX, Schema::TABLE_DESTINATION_TAG],
+            ChainCatalog::XAHAU => [Schema::TABLE_XAHAU_TX, Schema::TABLE_XAHAU_DESTINATION_TAG],
+            default => throw new InvalidArgumentException("No XRPL-protocol tables for the chain '{$chain}'."),
+        };
 
         $this->transactionTable = $transactionTable;
         $this->counter = new SequenceCounter($connection, $counterTable);

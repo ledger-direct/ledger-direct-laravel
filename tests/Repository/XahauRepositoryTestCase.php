@@ -11,6 +11,7 @@ use Hardcastle\LedgerDirect\Core\Xrpl\Schema;
 use Hardcastle\LedgerDirect\Laravel\Database\LedgerDirectTables;
 use Hardcastle\LedgerDirect\Laravel\Repository\DatabaseXrplTransactionRepository;
 use Illuminate\Database\Connection;
+use InvalidArgumentException;
 
 /**
  * The core's repository contract on Xahau's tables, plus the rule that
@@ -52,6 +53,14 @@ abstract class XahauRepositoryTestCase extends XrplTransactionRepositoryContract
         LedgerDirectTables::create($schema);
 
         return new DatabaseXrplTransactionRepository($this->connection, ChainCatalog::XAHAU);
+    }
+
+    public function testAChainWithoutXrplProtocolTablesIsRefused(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("No XRPL-protocol tables for the chain 'STELLAR'");
+
+        new DatabaseXrplTransactionRepository($this->connection, ChainCatalog::STELLAR);
     }
 
     public function testNothingIsSharedWithTheXrpLedger(): void
