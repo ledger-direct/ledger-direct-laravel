@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Hardcastle\LedgerDirect\Laravel\Repository;
 
+use Hardcastle\LedgerDirect\Core\ChainCatalog;
 use Hardcastle\LedgerDirect\Core\Port\XrplTransactionRepositoryInterface;
 use Hardcastle\LedgerDirect\Core\Xrpl\Schema;
 use Hardcastle\LedgerDirect\Core\Xrpl\XrplTransaction;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
+use InvalidArgumentException;
 use JsonException;
 use UnexpectedValueException;
 
@@ -26,12 +28,27 @@ use UnexpectedValueException;
  */
 final class DatabaseXrplTransactionRepository implements XrplTransactionRepositoryInterface
 {
+    private readonly string $transactionTable;
+
     private readonly SequenceCounter $counter;
 
+    /**
+     * @param string $chain 'XRPL' or 'XAHAU'. Xahau speaks the same protocol and
+     *     keeps the same columns in tables of its own; no row and no tag counter
+     *     is shared between the two, not even for an account on both.
+     */
     public function __construct(
         private readonly Connection $connection,
+        string $chain = ChainCatalog::XRPL,
     ) {
-        $this->counter = new SequenceCounter($connection, Schema::TABLE_DESTINATION_TAG);
+        [$transactionTable, $counterTable] = match ($chain) {
+            ChainCatalog::XRPL => [Schema::TABLE_TX, Schema::TABLE_DESTINATION_TAG],
+            ChainCatalog::XAHAU => [Schema::TABLE_XAHAU_TX, Schema::TABLE_XAHAU_DESTINATION_TAG],
+            default => throw new InvalidArgumentException("No XRPL-protocol tables for the chain '{$chain}'."),
+        };
+
+        $this->transactionTable = $transactionTable;
+        $this->counter = new SequenceCounter($connection, $counterTable);
     }
 
     public function connection(): Connection
@@ -138,7 +155,7 @@ final class DatabaseXrplTransactionRepository implements XrplTransactionReposito
 
     private function transactions(): Builder
     {
-        return $this->connection->table(Schema::TABLE_TX);
+        return $this->connection->table($this->transactionTable);
     }
 
     private static function hydrate(object $row): XrplTransaction

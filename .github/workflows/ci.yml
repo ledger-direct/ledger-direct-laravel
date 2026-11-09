@@ -152,8 +152,28 @@ jobs:
       - name: PHPStan
         run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress
 
+  # One account for the whole run: the Xahau faucet allows one request per IP
+  # and minute or more, and the acceptance matrix would queue behind itself.
+  fund-xahau:
+    name: Fund a Xahau testnet account
+    if: github.event_name == 'workflow_dispatch' && inputs.integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      address: ${{ steps.account.outputs.address }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fund the account
+        id: account
+        run: |
+          address=$(dev/fund-testnet-account.sh xahau)
+          echo "address=$address" >> "$GITHUB_OUTPUT"
+
   integration:
-    name: Integration · XRPL testnet and price oracles
+    name: Integration · testnets and price oracles
+    needs: fund-xahau
     if: github.event_name == 'workflow_dispatch' && inputs.integration
     runs-on: ubuntu-latest
     # Live network: never wait for GitHub's six-hour default.
@@ -188,10 +208,12 @@ jobs:
         env:
           LEDGER_DIRECT_TEST_XRPL_ACCOUNT: ${{ steps.account.outputs.address }}
           LEDGER_DIRECT_TEST_STELLAR_ACCOUNT: ${{ steps.stellar.outputs.address }}
+          LEDGER_DIRECT_TEST_XAHAU_ACCOUNT: ${{ needs.fund-xahau.outputs.address }}
         run: vendor/bin/phpunit --testsuite integration --fail-on-skipped
 
   acceptance:
     name: Acceptance · fresh Laravel ${{ matrix.laravel }} app on ${{ matrix.database }}
+    needs: fund-xahau
     if: github.event_name == 'workflow_dispatch' && inputs.integration
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -228,6 +250,7 @@ jobs:
       LEDGER_DIRECT_TEST_PGSQL_HOST: 127.0.0.1
       LEDGER_DIRECT_TEST_PGSQL_PORT: 5432
       LEDGER_DIRECT_TEST_PGSQL_PASSWORD: root
+      LEDGER_DIRECT_TEST_XAHAU_ACCOUNT: ${{ needs.fund-xahau.outputs.address }}
 
     steps:
       - uses: actions/checkout@v4

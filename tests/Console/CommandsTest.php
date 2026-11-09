@@ -67,8 +67,8 @@ final class CommandsTest extends TestCase
 
     public function testSyncRejectsAnUnknownChain(): void
     {
-        $this->artisan('ledger-direct:sync', ['--chain' => 'xahau'])
-            ->expectsOutputToContain('Unsupported chain "xahau". Supported: xrpl, stellar.')
+        $this->artisan('ledger-direct:sync', ['--chain' => 'nosuchchain'])
+            ->expectsOutputToContain('Unsupported chain "nosuchchain". Supported: xrpl, stellar, xahau.')
             ->assertExitCode(2);
     }
 
@@ -112,6 +112,39 @@ final class CommandsTest extends TestCase
         self::assertCount(2, $http->sentRequests());
     }
 
+    public function testSyncOfXahauStoresInItsOwnTable(): void
+    {
+        $this->enableXahau();
+        $http = $this->fakeHttp();
+        $http->queueResponse(self::XAHAU_NODE, self::accountTx([self::xrpPayment('HASH_X', 901, 1_000_000, 500, self::XAHAU_ACCOUNT)]));
+
+        $this->artisan('ledger-direct:sync', ['--chain' => 'xahau'])
+            ->expectsOutputToContain('Synced ' . self::XAHAU_ACCOUNT . ' on XAHAU testnet')
+            ->assertSuccessful();
+
+        self::assertCount(1, $http->sentRequests());
+        self::assertSame(1, DB::table(Schema::TABLE_XAHAU_TX)->count());
+        self::assertSame(0, DB::table(Schema::TABLE_TX)->count(), 'nothing lands in the XRP Ledger table');
+    }
+
+    public function testSyncWithoutAChainCoversXahauToo(): void
+    {
+        $this->enableStellar();
+        $this->enableXahau();
+        $http = $this->fakeHttp();
+        $http->queueResponse('s.altnet.rippletest.net', self::accountTx());
+        $http->queueResponse('/payments', self::horizonPayments());
+        $http->queueResponse(self::XAHAU_NODE, self::accountTx());
+
+        $this->artisan('ledger-direct:sync')
+            ->expectsOutputToContain('on XRPL testnet')
+            ->expectsOutputToContain('on STELLAR testnet')
+            ->expectsOutputToContain('on XAHAU testnet')
+            ->assertSuccessful();
+
+        self::assertCount(3, $http->sentRequests());
+    }
+
     public function testOneChainFailingDoesNotStopTheOther(): void
     {
         $this->enableStellar();
@@ -153,6 +186,20 @@ final class CommandsTest extends TestCase
             ->expectsOutputToContain('Stellar')
             ->expectsOutputToContain('1 XLM = 0.25 EUR')
             ->expectsOutputToContain('4 XLM')
+            ->assertSuccessful();
+    }
+
+    public function testPriceOfXahUsesCoingeckoAndBitrue(): void
+    {
+        $http = $this->fakeHttp();
+        $http->queueResponse('api.coingecko.com', new Response(200, [], '{"xahau":{"usd":0.05}}'));
+        $http->queueResponse('openapi.bitrue.com', new Response(200, [], '{"symbol":"XAHUSDT","price":"0.05"}'));
+
+        $this->artisan('ledger-direct:price', ['asset' => 'xah', 'currency' => 'usd'])
+            ->expectsOutputToContain('XAH/USD')
+            ->expectsOutputToContain('Xahau')
+            ->expectsOutputToContain('1 XAH = 0.05 USD')
+            ->expectsOutputToContain('20 XAH')
             ->assertSuccessful();
     }
 

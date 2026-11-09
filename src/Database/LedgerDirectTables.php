@@ -4,14 +4,16 @@ declare(strict_types=1);
 
 namespace Hardcastle\LedgerDirect\Laravel\Database;
 
+use Hardcastle\LedgerDirect\Core\ChainCatalog;
 use Hardcastle\LedgerDirect\Core\Stellar\Schema as StellarSchema;
 use Hardcastle\LedgerDirect\Core\Xrpl\Schema as XrplSchema;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\Builder;
 
 /**
- * Builds the core's tables from its schema classes — Xrpl\Schema::tables(),
- * Stellar\Schema::tables() — read, not copied, so a column the core adds
+ * Builds the core's tables from its schema classes — Xrpl\Schema::tables()
+ * for the XRP Ledger and for Xahau, Stellar\Schema::tables() — read, not
+ * copied, so a column the core adds
  * reaches every Laravel installation through its next migration instead of
  * through a hand-edited one.
  *
@@ -78,6 +80,21 @@ final class LedgerDirectTables
     public static function dropStellarReSyncable(Builder $schema): void
     {
         $schema->dropIfExists(StellarSchema::TABLE_PAYMENT);
+    }
+
+    /** The Xahau tables, on the same terms as create(): nothing is shared with the XRP Ledger's. */
+    public static function createXahau(Builder $schema): void
+    {
+        self::createFrom($schema, XrplSchema::tables(ChainCatalog::XAHAU));
+    }
+
+    /**
+     * Drops the Xahau transaction table, which the next sync rebuilds. The
+     * destination-tag counter stays, for the reason the XRP Ledger's does.
+     */
+    public static function dropXahauReSyncable(Builder $schema): void
+    {
+        $schema->dropIfExists(XrplSchema::TABLE_XAHAU_TX);
     }
 
     /**

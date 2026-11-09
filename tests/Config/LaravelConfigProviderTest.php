@@ -14,6 +14,8 @@ final class LaravelConfigProviderTest extends TestCase
 {
     private const ACCOUNT = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh';
 
+    private const OTHER_ACCOUNT = 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe';
+
     public function testReadsTheXrplBlockUnderTheCoreChainName(): void
     {
         $provider = $this->provider(['network' => 'mainnet', 'destination_account' => self::ACCOUNT]);
@@ -21,8 +23,8 @@ final class LaravelConfigProviderTest extends TestCase
         self::assertSame('mainnet', $provider->getNetwork('XRPL'));
         self::assertSame(self::ACCOUNT, $provider->getDestinationAccount('XRPL'));
         self::assertSame(300, $provider->getQuoteExpirySeconds());
-        self::assertSame(['XRPL', 'STELLAR'], $provider->configuredChains());
-        self::assertSame(['XRPL'], $provider->enabledChains(), 'Stellar is opt-in');
+        self::assertSame(['XRPL', 'STELLAR', 'XAHAU'], $provider->configuredChains());
+        self::assertSame(['XRPL'], $provider->enabledChains(), 'every chain but the XRP Ledger is opt-in');
     }
 
     public function testOnlyAnExplicitTrueEnablesAnAsset(): void
@@ -104,9 +106,9 @@ final class LaravelConfigProviderTest extends TestCase
     public function testAnUnknownChainIsAClearError(): void
     {
         $this->expectException(InvalidConfigurationException::class);
-        $this->expectExceptionMessage('does not know the chain "XAHAU"');
+        $this->expectExceptionMessage('does not know the chain "NOSUCHCHAIN"');
 
-        $this->provider()->getNetwork('XAHAU');
+        $this->provider()->getNetwork('NOSUCHCHAIN');
     }
 
     public function testMapsCliChainNames(): void
@@ -114,7 +116,8 @@ final class LaravelConfigProviderTest extends TestCase
         self::assertSame('XRPL', LaravelConfigProvider::coreChainName('xrpl'));
         self::assertSame('XRPL', LaravelConfigProvider::coreChainName('XRPL'));
         self::assertSame('STELLAR', LaravelConfigProvider::coreChainName('stellar'));
-        self::assertNull(LaravelConfigProvider::coreChainName('xahau'));
+        self::assertSame('XAHAU', LaravelConfigProvider::coreChainName('xahau'));
+        self::assertNull(LaravelConfigProvider::coreChainName('nosuchchain'));
     }
 
     private const STELLAR_ACCOUNT = 'GAHK7EEG2WWHVKDNT4CEQFZGKF2LGDSW2IVM4S5DP42RBW3K6BTODB4A';
@@ -169,6 +172,41 @@ final class LaravelConfigProviderTest extends TestCase
         self::assertFalse($provider->isChainEnabled('STELLAR'));
     }
 
+    public function testXahauIsOptInAndTakesOnlyXah(): void
+    {
+        self::assertFalse($this->provider()->isChainEnabled('XAHAU'));
+
+        $provider = $this->provider([], [], [], ['enabled' => true, 'destination_account' => self::OTHER_ACCOUNT, 'assets' => ['XAH' => true, 'XRP' => true]]);
+
+        self::assertSame(['XRPL', 'XAHAU'], $provider->enabledChains());
+        self::assertSame(self::OTHER_ACCOUNT, $provider->getDestinationAccount('XAHAU'));
+        self::assertTrue($provider->isAssetEnabled('XAHAU', 'XAH'));
+        self::assertFalse($provider->isAssetEnabled('XAHAU', 'XRP'), 'XRP is not a Xahau asset, whatever the config says');
+        self::assertSame([], $provider->accountsOnSeveralChains());
+    }
+
+    public function testAMissingXahauAccountNamesItsEnvVariable(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+        $this->expectExceptionMessage('LEDGER_DIRECT_XAHAU_ACCOUNT');
+
+        $this->provider([], [], [], ['enabled' => true, 'destination_account' => null])->getDestinationAccount('XAHAU');
+    }
+
+    public function testTheSameAccountOnTheXrpLedgerAndXahauIsReported(): void
+    {
+        $provider = $this->provider([], [], [], ['enabled' => true, 'destination_account' => self::ACCOUNT]);
+
+        self::assertSame([self::ACCOUNT => ['XRPL', 'XAHAU']], $provider->accountsOnSeveralChains());
+    }
+
+    public function testASharedAccountOnADisabledChainIsNotReported(): void
+    {
+        $provider = $this->provider([], [], [], ['enabled' => false, 'destination_account' => self::ACCOUNT]);
+
+        self::assertSame([], $provider->accountsOnSeveralChains());
+    }
+
     public function testXrplCanBeSwitchedOff(): void
     {
         $provider = $this->provider(['enabled' => false]);
@@ -181,12 +219,14 @@ final class LaravelConfigProviderTest extends TestCase
      * @param array<string, mixed> $xrpl
      * @param array<string, mixed> $root
      * @param array<string, mixed> $stellar
+     * @param array<string, mixed> $xahau
      */
-    private function provider(array $xrpl = [], array $root = [], array $stellar = []): LaravelConfigProvider
+    private function provider(array $xrpl = [], array $root = [], array $stellar = [], array $xahau = []): LaravelConfigProvider
     {
         $config = require __DIR__ . '/../../config/ledger-direct.php';
         $config['chains']['xrpl'] = array_replace($config['chains']['xrpl'], ['destination_account' => self::ACCOUNT], $xrpl);
         $config['chains']['stellar'] = array_replace($config['chains']['stellar'], $stellar);
+        $config['chains']['xahau'] = array_replace($config['chains']['xahau'], $xahau);
 
         return new LaravelConfigProvider(new Repository(['ledger-direct' => array_replace($config, $root)]));
     }

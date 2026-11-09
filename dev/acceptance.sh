@@ -6,17 +6,22 @@
 # Creates a new app with `composer create-project laravel/laravel`, installs
 # this package the way Packagist will ship it (a `git archive` of
 # LEDGER_DIRECT_ACCEPTANCE_REF, default HEAD, as version
-# LEDGER_DIRECT_ACCEPTANCE_VERSION, default 0.2.0), then walks
+# LEDGER_DIRECT_ACCEPTANCE_VERSION, default 0.3.0), then walks
 # the README: vendor:publish, migrate, a funded testnet account in .env,
 # `about`, `ledger-direct:price`, `ledger-direct:sync`, two quotes, a status
 # answer — first on the XRP Ledger, then with Stellar enabled on a
-# Friendbot-funded account — and migrate:rollback keeping both counters.
+# Friendbot-funded account and Xahau on a faucet-funded one — and
+# migrate:rollback keeping every counter.
 #
 # Needs network (Packagist, the XRPL testnet faucet and node, the price
 # oracles), PHP with pdo_sqlite/pdo_mysql/pdo_pgsql, Composer, curl and jq.
 # MySQL and PostgreSQL default to the containers of `docker compose up -d
 # mysql postgres` (127.0.0.1:33306 and :35432, password root); override with
 # LEDGER_DIRECT_TEST_{MYSQL,PGSQL}_{HOST,PORT,USERNAME,PASSWORD}.
+#
+# The Xahau faucet allows one request per IP and minute or more. To run several
+# combinations in a row, fund one account (dev/fund-testnet-account.sh xahau)
+# and pass it as LEDGER_DIRECT_TEST_XAHAU_ACCOUNT.
 #
 # The app is created under LEDGER_DIRECT_ACCEPTANCE_DIR (default: a new
 # temporary directory) and left there for inspection.
@@ -29,7 +34,7 @@ case "$database" in sqlite|mysql|pgsql) ;; *) echo "sqlite, mysql or pgsql, not 
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
 ref=${LEDGER_DIRECT_ACCEPTANCE_REF:-HEAD}
-version=${LEDGER_DIRECT_ACCEPTANCE_VERSION:-0.2.0}
+version=${LEDGER_DIRECT_ACCEPTANCE_VERSION:-0.3.0}
 work=${LEDGER_DIRECT_ACCEPTANCE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/ledger-direct-acceptance.XXXXXX")}
 app="$work/laravel-$laravel-$database"
 package="$work/package"
@@ -147,6 +152,25 @@ php "$app/artisan" ledger-direct:sync
 
 step "Stellar: payment options, two quotes and a status answer"
 php "$app/acceptance-checks.php" stellar
+
+step "Xahau: a faucet-funded account in .env"
+xahau_account=${LEDGER_DIRECT_TEST_XAHAU_ACCOUNT:-$("$repo/dev/fund-testnet-account.sh" xahau)}
+set_env LEDGER_DIRECT_XAHAU_ENABLED true
+set_env LEDGER_DIRECT_XAHAU_NETWORK testnet
+set_env LEDGER_DIRECT_XAHAU_ACCOUNT "$xahau_account"
+echo "$xahau_account"
+
+step "Xahau: about, price XAH EUR, sync"
+about=$(php "$app/artisan" about --only=ledgerdirect)
+echo "$about"
+grep -q "${xahau_account:0:6}" <<<"$about" || fail "about does not show the Xahau account"
+php "$app/artisan" ledger-direct:price XAH EUR | tee "$work/price-xah.txt"
+grep -q 'XAH/EUR' "$work/price-xah.txt" || fail "no XAH/EUR rate"
+php "$app/artisan" ledger-direct:sync --chain=xahau
+php "$app/artisan" ledger-direct:sync
+
+step "Xahau: synced rows, payment options, two quotes and a status answer"
+php "$app/acceptance-checks.php" xahau
 
 step "migrate:rollback keeps the counter, migrate rebuilds the rest"
 php "$app/artisan" migrate:rollback --force --no-interaction

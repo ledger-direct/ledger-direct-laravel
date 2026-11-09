@@ -1,8 +1,8 @@
 # ledger-direct-laravel
 
 LedgerDirect for Laravel: binds [`hardcastle/ledger-direct-core`](https://github.com/ledger-direct/ledger-direct-core-php)
-— XRP, RLUSD and USDC payments on the XRP Ledger, XLM, USDC and EURC on Stellar — into any
-Laravel 12 or 13 application.
+— XRP, RLUSD and USDC payments on the XRP Ledger, XLM, USDC and EURC on Stellar, XAH on Xahau —
+into any Laravel 12 or 13 application.
 
 A thin bridge, and deliberately nothing more: a service provider, a facade, config, a migration,
 the storage the core needs, Artisan commands and the building blocks of a payment-status
@@ -15,7 +15,7 @@ same way. A shop integration (Bagisto first) sits on top of this package.
 |---|---|
 | Composer | `hardcastle/ledger-direct-laravel` |
 | Namespace | `Hardcastle\LedgerDirect\Laravel\` |
-| Requires | PHP 8.2+ · Laravel 12 (PHP 8.2–8.4) or Laravel 13 (PHP 8.3+) · core `^0.10` |
+| Requires | PHP 8.2+ · Laravel 12 (PHP 8.2–8.4) or Laravel 13 (PHP 8.3+) · core `^0.11` |
 | License | MIT |
 
 ## Installation
@@ -37,6 +37,11 @@ LEDGER_DIRECT_XRPL_ACCOUNT=rYourReceivingAddress
 LEDGER_DIRECT_STELLAR_ENABLED=true
 LEDGER_DIRECT_STELLAR_NETWORK=testnet          # mainnet | testnet
 LEDGER_DIRECT_STELLAR_ACCOUNT=GYourReceivingPublicKey
+
+# Xahau is opt-in too; use an account of its own:
+LEDGER_DIRECT_XAHAU_ENABLED=true
+LEDGER_DIRECT_XAHAU_NETWORK=testnet            # mainnet | testnet
+LEDGER_DIRECT_XAHAU_ACCOUNT=rYourXahauReceivingAddress
 ```
 
 Check it:
@@ -47,11 +52,13 @@ php artisan ledger-direct:sync                # pulls incoming payments of every
 php artisan about --only=ledgerdirect         # core version, cache, and per chain: network, account, assets
 ```
 
-The package is auto-discovered; the provider and the `LedgerDirect` and `LedgerDirectStellar`
-aliases register themselves. Upgrading from 0.1: publish the migrations again
-(`vendor:publish --tag=ledger-direct-migrations`) and `migrate` — that adds the Stellar tables. A
-config file published by 0.1 keeps working; it simply has no Stellar block until you publish the
-config again or add one.
+The package is auto-discovered; the provider and the `LedgerDirect`, `LedgerDirectStellar` and
+`LedgerDirectXahau` aliases register themselves.
+
+**Upgrading.** Publish the migrations again (`vendor:publish --tag=ledger-direct-migrations`) and
+`migrate`: that adds the tables of the chains that came after your version. A config file published
+earlier keeps working; it simply has no block for a newer chain, which stays off, until you publish
+the config again or add one.
 
 ## Configuration
 
@@ -67,6 +74,10 @@ config again or add one.
 | `chains.stellar.network` | `testnet` | `mainnet` or `testnet` (`LEDGER_DIRECT_STELLAR_NETWORK`) |
 | `chains.stellar.destination_account` | — | your `G…` public key (`LEDGER_DIRECT_STELLAR_ACCOUNT`) |
 | `chains.stellar.assets` | XLM on, USDC/EURC off | stablecoins are opt-in, and offered only while the account has a trust line for them |
+| `chains.xahau.enabled` | `false` | takes payments on Xahau (`LEDGER_DIRECT_XAHAU_ENABLED`) |
+| `chains.xahau.network` | `testnet` | `mainnet` or `testnet` (`LEDGER_DIRECT_XAHAU_NETWORK`) |
+| `chains.xahau.destination_account` | — | a classic `r…` address of its own (`LEDGER_DIRECT_XAHAU_ACCOUNT`) |
+| `chains.xahau.assets` | XAH on | no issued assets on Xahau yet |
 | `quote_expiry_seconds` | `300` | 60–3600 |
 | `native_asset_tolerance` | core default (`'0.0015'`) | how far an XRP payment may fall short and still settle; a decimal string in [0, 1) |
 | `rate_fresh_ttl_seconds` | core default (60) | how long an exchange rate is served from the cache |
@@ -74,7 +85,9 @@ config again or add one.
 | `log_channel` | default channel | |
 | `connection` | default connection | where the `ledger_direct_*` tables live |
 
-A disabled chain accepts nothing, its native asset included. There are no issuer addresses in the
+A receiving account is checked by format and checksum (the core's `ChainCatalog`), so a mistyped
+character is refused rather than quoted to customers. A disabled chain accepts nothing, its native
+asset included. There are no issuer addresses in the
 config: which issuer an RLUSD, USDC or EURC payment has to come from is fixed in the core's
 registries and never configurable — a wrong issuer means lost funds.
 
@@ -83,8 +96,13 @@ configured yet still boots and migrates, and the first payment code path fails w
 naming the setting (`Hardcastle\LedgerDirect\Laravel\Config\InvalidConfigurationException`, a
 `LedgerDirectException` like everything the core throws).
 
+**One account per chain.** The same keys open the same `r…` address on the XRP Ledger and on Xahau,
+and a payment sent on the wrong one reaches your account but never an order. The format cannot
+tell them apart, so the same address on both is not refused: it is logged as a warning and shown
+in `php artisan about`.
+
 **Cache.** One store serves the rate cache, the sync throttle and the Stellar account lookups of
-both chains. With the `array` or `null` store nothing survives the request: rates are not cached,
+all chains. With the `array` or `null` store nothing survives the request: rates are not cached,
 the status throttle never engages so every poll hits the node, and every checkout asks Horizon
 again — against a public limit of 3600 requests per hour. The provider logs a warning when it sees
 one. In tests `array` is right; in production use `redis`, `database` or `file`.
@@ -114,10 +132,16 @@ use Hardcastle\LedgerDirect\Laravel\Facades\LedgerDirectStellar;
 $intent = LedgerDirectStellar::paymentIntentService()->quoteForOrder(49.90, 'EUR', 'XLM');
 ```
 
+Xahau speaks the XRP Ledger's protocol, so its root is a second `Core\LedgerDirect`, created for
+the chain and resolved under `LedgerDirectServiceProvider::XAHAU_ROOT`; the facade is
+`LedgerDirectXahau`. There `chain` is `XAHAU`, `type` is `xahau-xah-payment`, and `destinationTag` is
+a destination tag as on the XRP Ledger. Its payment request names the network, so Xaman offers the
+switch when it is set to another one.
+
 Or inject the roots wherever the container resolves your classes. Code that handles intents of
 either chain — a payment page, a status endpoint, a cron job — asks
 `Hardcastle\LedgerDirect\Laravel\Chains\LedgerDirectChains` for the root by the intent's chain
-instead of branching itself; both roots offer the same calls (`syncService()`, `settlementPolicy()`,
+instead of branching itself; all roots offer the same calls (`syncService()`, `settlementPolicy()`,
 `paymentStatus()`, …):
 
 ```php
@@ -230,13 +254,15 @@ for the commit and are dropped on a rollback (`ShouldDispatchAfterCommit`).
 
 ## Tables and `migrate:fresh`
 
-Two migrations, built from the core's schema classes, under your connection's table prefix:
+Three migrations, built from the core's schema classes, under your connection's table prefix:
 `ledger_direct_xrpl_tx` and `ledger_direct_xrpl_destination_tag` from `Xrpl\Schema::tables()`,
-`ledger_direct_stellar_payment` and `ledger_direct_stellar_memo` from `Stellar\Schema::tables()`.
-The Stellar tables are created whether or not Stellar is enabled; empty tables cost nothing.
+`ledger_direct_stellar_payment` and `ledger_direct_stellar_memo` from `Stellar\Schema::tables()`,
+`ledger_direct_xahau_tx` and `ledger_direct_xahau_destination_tag` from `Xrpl\Schema::tables('XAHAU')`.
+All are created whether or not the chain is enabled; empty tables cost nothing. Xahau shares no row
+and no counter with the XRP Ledger, not even for an account that exists on both.
 
 `migrate:rollback` drops only the payment tables — the next sync rebuilds them from the ledger. It
-**keeps** the counters, `ledger_direct_xrpl_destination_tag` and `ledger_direct_stellar_memo`: a
+**keeps** the counters (`…_destination_tag`, `ledger_direct_stellar_memo`): a
 counter is the only record of which destination tags or memo ids were already issued, and a fresh
 one hands out identifiers that open orders are still waiting on, so one customer's payment settles
 another customer's order.
@@ -259,7 +285,7 @@ nothing else: a value that does not fit its column is an error, never a silent t
 
 ## Swapping infrastructure
 
-Both roots are built from the same container entries, which you can rebind in a service provider
+All roots are built from the same container entries, which you can rebind in a service provider
 or a test:
 
 | Key (`LedgerDirectServiceProvider::…`) | Default |
@@ -268,6 +294,7 @@ or a test:
 | `CACHE` | `Cache::store(config('ledger-direct.cache_store'))` |
 | `LOGGER` | `Log::channel(config('ledger-direct.log_channel'))` |
 | `CLOCK` | `Clock\LaravelClock` |
+| `XAHAU_REPOSITORY` | `DatabaseXrplTransactionRepository` on the Xahau tables |
 
 `XrplTransactionRepositoryInterface`, `StellarPaymentRepositoryInterface` and
 `ConfigProviderInterface` are bound to the bridge's implementations and can be rebound the same way.
@@ -304,21 +331,23 @@ LEDGER_DIRECT_TEST_PGSQL_PASSWORD=root vendor/bin/phpunit    # everything agains
 docker compose run --rm php vendor/bin/phpunit                # the same inside the PHP 8.4 container
 
 LEDGER_DIRECT_TEST_XRPL_ACCOUNT=$(dev/fund-testnet-account.sh) \
+LEDGER_DIRECT_TEST_XAHAU_ACCOUNT=$(dev/fund-testnet-account.sh xahau) \
 LEDGER_DIRECT_TEST_STELLAR_ACCOUNT=$(dev/fund-stellar-testnet-account.sh) \
-vendor/bin/phpunit --testsuite integration  # live oracles, XRPL testnet and Horizon testnet
+vendor/bin/phpunit --testsuite integration  # live oracles, the XRPL, Xahau and Stellar testnets
 ```
 
 **Acceptance in a fresh app.** `dev/acceptance.sh <12|13> <sqlite|mysql|pgsql>` creates a new
 Laravel app with `composer create-project`, installs this package from a `git archive` of `HEAD`
 (what Packagist ships) and walks this README: publish, migrate, a faucet-funded XRPL testnet
 account, `about`, `price`, `sync`, two quotes from consecutive counter values, a status answer;
-then Stellar on a Friendbot-funded account with the same steps, the payment options and the
-SEP-0007 request; and a rollback that keeps both counters. It needs network, and for MySQL/PostgreSQL the Docker containers
+then Stellar on a Friendbot-funded account and Xahau on a faucet-funded one with the same steps,
+the payment options and each chain's payment request; and a rollback that keeps every counter. It needs network, and for MySQL/PostgreSQL the Docker containers
 above. CI runs all six combinations together with the integration suite when the workflow is
 started by hand with *integration* ticked.
 
 The repository runs the core's `XrplTransactionRepositoryContractTestCase` and
-`StellarPaymentRepositoryContractTestCase` against SQLite, MySQL and PostgreSQL, plus multi-process
+`StellarPaymentRepositoryContractTestCase`, the former on the XRP Ledger's and on Xahau's tables,
+against SQLite, MySQL and PostgreSQL, plus multi-process
 tests that the identifier counter stays gapless and duplicate-free on MySQL, PostgreSQL and a
 SQLite file. CI covers Laravel 12 × PHP 8.2–8.4 and Laravel 13 × PHP 8.3–8.4, each with lowest
 and newest dependencies.

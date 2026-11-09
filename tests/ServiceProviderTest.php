@@ -15,6 +15,8 @@ use Hardcastle\LedgerDirect\Laravel\Config\InvalidConfigurationException;
 use Hardcastle\LedgerDirect\Laravel\Config\LaravelConfigProvider;
 use Hardcastle\LedgerDirect\Laravel\Facades\LedgerDirect as LedgerDirectFacade;
 use Hardcastle\LedgerDirect\Laravel\Facades\LedgerDirectStellar as LedgerDirectStellarFacade;
+use Hardcastle\LedgerDirect\Laravel\Facades\LedgerDirectXahau as LedgerDirectXahauFacade;
+use Hardcastle\LedgerDirect\Laravel\LedgerDirectServiceProvider;
 use Hardcastle\LedgerDirect\Laravel\Repository\DatabaseStellarPaymentRepository;
 use Hardcastle\LedgerDirect\Laravel\Repository\DatabaseXrplTransactionRepository;
 use Illuminate\Support\Facades\Artisan;
@@ -53,6 +55,52 @@ final class ServiceProviderTest extends TestCase
         self::assertSame($xrpl->clock(), $stellar->clock());
     }
 
+    public function testTheXahauRootIsItsOwnSingletonOnItsOwnTables(): void
+    {
+        $xrpl = $this->app->make(LedgerDirect::class);
+        $xahau = $this->app->make(LedgerDirectServiceProvider::XAHAU_ROOT);
+
+        self::assertInstanceOf(LedgerDirect::class, $xahau);
+        self::assertNotSame($xrpl, $xahau);
+        self::assertSame($xahau, $this->app->make(LedgerDirectServiceProvider::XAHAU_ROOT));
+        self::assertSame($xahau, LedgerDirectXahauFacade::getFacadeRoot());
+        self::assertNotSame($xrpl->transactionRepository(), $xahau->transactionRepository());
+        self::assertSame($xrpl->configProvider(), $xahau->configProvider());
+        self::assertSame($xahau, $this->app->make(LedgerDirectChains::class)->forIntent(self::xahIntent(1.0)));
+    }
+
+    public function testAXahauQuoteRequestNamesTheWalletNetwork(): void
+    {
+        $uri = $this->app->make(LedgerDirectChains::class)->paymentUri(self::xahIntent(1.0), '1');
+
+        self::assertStringStartsWith('https://xrplf.org//send?', $uri);
+        self::assertStringEndsWith('network=XAHAUTESTNET', $uri);
+    }
+
+    public function testTheSameAccountOnBothLedgersLogsAWarningButWorks(): void
+    {
+        $this->enableXahau();
+        $this->app['config']->set('ledger-direct.chains.xahau.destination_account', self::ACCOUNT);
+        $logger = $this->recordLogs();
+
+        $root = $this->app->make(LedgerDirectServiceProvider::XAHAU_ROOT);
+
+        self::assertInstanceOf(LedgerDirect::class, $root, 'a warning, not a refusal: the formats are identical');
+        $shared = array_filter($logger->records(), static fn (array $r): bool => str_contains($r['message'], 'configured on several chains'));
+        self::assertCount(1, $shared);
+        self::assertSame(['XRPL', 'XAHAU'], array_values($shared)[0]['context']['chains']);
+    }
+
+    public function testAccountsOfTheirOwnLogNoSharedAccountWarning(): void
+    {
+        $this->enableXahau();
+        $logger = $this->recordLogs();
+
+        $this->app->make(LedgerDirectServiceProvider::XAHAU_ROOT);
+
+        self::assertSame([], array_filter($logger->records(), static fn (array $r): bool => str_contains($r['message'], 'several chains')));
+    }
+
     /** One cache store for both roots, warned about once. */
     public function testAnArrayCacheWarnsOnceForBothRoots(): void
     {
@@ -80,7 +128,7 @@ final class ServiceProviderTest extends TestCase
     {
         $this->expectException(UnsupportedChainException::class);
 
-        $this->app->make(LedgerDirectChains::class)->forChain('XAHAU');
+        $this->app->make(LedgerDirectChains::class)->forChain('NOSUCHCHAIN');
     }
 
     public function testTheRepositoryUsesTheConfiguredConnection(): void
@@ -178,6 +226,19 @@ final class ServiceProviderTest extends TestCase
         self::assertStringContainsString('LedgerDirect', $output);
         self::assertMatchesRegularExpression('/XRP Ledger \\.+ testnet · rHb9CJ…tyTh · XRP/u', $output);
         self::assertMatchesRegularExpression('/Stellar \\.+ off/u', $output);
+        self::assertMatchesRegularExpression('/Xahau \\.+ off/u', $output);
+    }
+
+    public function testTheAboutCommandPointsOutASharedAccount(): void
+    {
+        $this->enableXahau();
+        $this->app['config']->set('ledger-direct.chains.xahau.destination_account', self::ACCOUNT);
+
+        Artisan::call('about', ['--only' => 'ledgerdirect']);
+        $output = Artisan::output();
+
+        self::assertMatchesRegularExpression('/Xahau \\.+ testnet · rHb9CJ…tyTh · XAH/u', $output);
+        self::assertStringContainsString('use one account per chain', $output);
     }
 
     public function testTheAboutCommandShowsAnEnabledStellar(): void

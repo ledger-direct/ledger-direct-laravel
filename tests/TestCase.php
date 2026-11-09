@@ -24,6 +24,12 @@ abstract class TestCase extends Orchestra
     /** A well-formed Stellar public key; nothing is ever sent to it. */
     public const STELLAR_ACCOUNT = 'GAHK7EEG2WWHVKDNT4CEQFZGKF2LGDSW2IVM4S5DP42RBW3K6BTODB4A';
 
+    /** A well-formed classic address of its own for Xahau; nothing is ever sent to it. */
+    public const XAHAU_ACCOUNT = 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe';
+
+    /** The Xahau testnet node, as the core's XrplClient addresses it. */
+    public const XAHAU_NODE = 'xahau-test.net';
+
     /** Horizon testnet, as the core's HorizonClient addresses it. */
     public const HORIZON = 'horizon-testnet.stellar.org';
 
@@ -65,7 +71,7 @@ abstract class TestCase extends Orchestra
     /** Fresh tables of both chains for tests that touch the database; the counter tables included. */
     protected function createTables(): void
     {
-        $tables = array_merge(array_keys(XrplSchema::tables()), array_keys(StellarSchema::tables()));
+        $tables = array_merge(array_keys(XrplSchema::tables()), array_keys(StellarSchema::tables()), array_keys(XrplSchema::tables('XAHAU')));
 
         foreach ($tables as $table) {
             Schema::dropIfExists($table);
@@ -73,6 +79,15 @@ abstract class TestCase extends Orchestra
 
         LedgerDirectTables::create(Schema::connection(null));
         LedgerDirectTables::createStellar(Schema::connection(null));
+        LedgerDirectTables::createXahau(Schema::connection(null));
+    }
+
+    /** Turns Xahau on with a valid receiving account of its own. */
+    protected function enableXahau(): void
+    {
+        $this->app['config']->set('ledger-direct.chains.xahau.enabled', true);
+        $this->app['config']->set('ledger-direct.chains.xahau.network', 'testnet');
+        $this->app['config']->set('ledger-direct.chains.xahau.destination_account', self::XAHAU_ACCOUNT);
     }
 
     /** Turns Stellar on with a valid receiving account; $assets on top of XLM. */
@@ -115,14 +130,14 @@ abstract class TestCase extends Orchestra
      *
      * @return array<string, mixed>
      */
-    protected static function xrpPayment(string $hash, int $tag, int $drops, int $ledgerIndex = 1000): array
+    protected static function xrpPayment(string $hash, int $tag, int $drops, int $ledgerIndex = 1000, string $destination = self::ACCOUNT): array
     {
         return [
             'meta' => ['delivered_amount' => (string) $drops, 'TransactionResult' => 'tesSUCCESS'],
             'tx' => [
                 'TransactionType' => 'Payment',
                 'Account' => 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe',
-                'Destination' => self::ACCOUNT,
+                'Destination' => $destination,
                 'DestinationTag' => $tag,
                 'Amount' => (string) $drops,
                 'hash' => $hash,
@@ -185,6 +200,23 @@ abstract class TestCase extends Orchestra
             'created_at' => '2026-10-27T12:00:00Z',
             'transaction' => ['memo_type' => 'id', 'memo' => (string) $memoId],
         ];
+    }
+
+    protected static function xahIntent(float $requested, ?int $expiry = null, int $tag = 4242): PaymentIntent
+    {
+        return PaymentIntent::quote(
+            type: 'xahau-xah-payment',
+            chain: 'XAHAU',
+            network: 'testnet',
+            baseAsset: 'XAH',
+            quoteCurrency: 'EUR',
+            pairing: 'XAH/EUR',
+            exchangeRate: 0.05,
+            amountRequested: $requested,
+            destinationAccount: self::XAHAU_ACCOUNT,
+            destinationTag: $tag,
+            expiry: $expiry,
+        );
     }
 
     protected static function xlmIntent(float $requested, ?int $expiry = null, int $memoId = 4242): PaymentIntent

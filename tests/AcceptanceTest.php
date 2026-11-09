@@ -13,6 +13,7 @@ use Hardcastle\LedgerDirect\Core\Xrpl\DestinationTagService;
 use Hardcastle\LedgerDirect\Core\Xrpl\Schema;
 use Hardcastle\LedgerDirect\Laravel\Facades\LedgerDirect;
 use Hardcastle\LedgerDirect\Laravel\Facades\LedgerDirectStellar;
+use Hardcastle\LedgerDirect\Laravel\Facades\LedgerDirectXahau;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -80,5 +81,29 @@ final class AcceptanceTest extends TestCase
         self::assertSame($memoIds->generateMemoId(self::STELLAR_ACCOUNT), $first->destinationTag);
         self::assertSame($memoIds->generateMemoId(self::STELLAR_ACCOUNT), $second->destinationTag);
         self::assertSame(2_000_002, (int) DB::table(StellarSchema::TABLE_MEMO)->value('sequence'));
+    }
+
+    public function testTwoXahauQuotesGetTwoTagsFromTheirOwnCounter(): void
+    {
+        $this->createTables();
+        $this->enableXahau();
+        DB::table(Schema::TABLE_XAHAU_DESTINATION_TAG)->insert(['destination_account' => self::XAHAU_ACCOUNT, 'sequence' => 3_000_000]);
+
+        $http = $this->fakeHttp();
+        foreach ([1, 2] as $ignored) {
+            $http->queueResponse('api.coingecko.com', new Response(200, [], '{"xahau":{"usd":0.05}}'));
+            $http->queueResponse('openapi.bitrue.com', new Response(200, [], '{"price":"0.05"}'));
+        }
+
+        $first = LedgerDirectXahau::paymentIntentService()->quoteForOrder(10.0, 'USD', 'XAH');
+        $second = LedgerDirectXahau::paymentIntentService()->quoteForOrder(10.0, 'USD', 'XAH');
+
+        self::assertSame('XAHAU', $first->chain);
+        self::assertSame('xahau-xah-payment', $first->type);
+        self::assertSame(200.0, $first->amountRequested);
+        self::assertSame(self::XAHAU_ACCOUNT, $first->destinationAccount);
+        self::assertNotSame($first->destinationTag, $second->destinationTag);
+        self::assertSame(3_000_002, (int) DB::table(Schema::TABLE_XAHAU_DESTINATION_TAG)->value('sequence'));
+        self::assertSame(0, DB::table(Schema::TABLE_DESTINATION_TAG)->count(), 'the XRP Ledger counter is not touched');
     }
 }
