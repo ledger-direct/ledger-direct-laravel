@@ -11,6 +11,10 @@ on:
         type: boolean
         default: false
 
+# Every job only reads the repository; nothing here writes to GitHub.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Laravel ${{ matrix.laravel }} · PHP ${{ matrix.php }} · ${{ matrix.stability }}
