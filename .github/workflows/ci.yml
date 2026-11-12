@@ -11,6 +11,10 @@ on:
         type: boolean
         default: false
 
+# Every job only reads the repository; nothing here writes to GitHub.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Laravel ${{ matrix.laravel }} · PHP ${{ matrix.php }} · ${{ matrix.stability }}
@@ -31,9 +35,11 @@ jobs:
           - { laravel: '13', testbench: '^11.0', php: '8.4', stability: prefer-stable }
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ matrix.php }}
           extensions: pdo_sqlite
@@ -75,9 +81,11 @@ jobs:
       LEDGER_DIRECT_TEST_MYSQL_PASSWORD: root
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.4'
           extensions: pdo_mysql
@@ -115,9 +123,11 @@ jobs:
       LEDGER_DIRECT_TEST_PGSQL_PASSWORD: root
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.4'
           extensions: pdo_pgsql
@@ -136,9 +146,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.4'
           coverage: none
@@ -152,6 +164,26 @@ jobs:
       - name: PHPStan
         run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress
 
+  # Every external action is referenced by a full commit SHA, with its version as a comment: a tag
+  # can be moved to other code, a commit cannot. Dependabot keeps the SHAs current.
+  pinned:
+    name: Actions pinned to commit SHAs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Every external action is pinned to a full commit SHA
+        run: |
+          # The key is spelled apart, so this file does not match its own pattern.
+          key=uses
+          unpinned=$(grep -rnoE "${key}:\s*[^ #]+" .github/ | grep -v "${key}: \./" | grep -vE '@[0-9a-f]{40}$' || true)
+          if [ -n "$unpinned" ]; then
+            echo "::error::Actions not pinned to a full commit SHA (owner/action@<sha> # vX.Y.Z):"
+            echo "$unpinned"
+            exit 1
+          fi
+
   # One account for the whole run: the Xahau faucet allows one request per IP
   # and minute or more, and the acceptance matrix would queue behind itself.
   fund-xahau:
@@ -163,7 +195,9 @@ jobs:
       address: ${{ steps.account.outputs.address }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Fund the account
         id: account
@@ -180,9 +214,11 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.4'
           coverage: none
@@ -253,9 +289,11 @@ jobs:
       LEDGER_DIRECT_TEST_XAHAU_ACCOUNT: ${{ needs.fund-xahau.outputs.address }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.4'
           extensions: pdo_sqlite, pdo_mysql, pdo_pgsql
